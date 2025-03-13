@@ -34,6 +34,7 @@ defmodule Ming.MixProject do
   defp deps do
     [
       {:telemetry, "~> 0.4 or ~> 1.0"},
+      {:jason, "~> 1.0", only: :test},
       {:ex_doc, "~> 0.20", only: :docs}
     ]
   end

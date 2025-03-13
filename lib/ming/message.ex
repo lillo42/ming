@@ -20,7 +20,7 @@ defmodule Ming.Message do
           data_ref: String.t() | nil,
           delayed: Duration.t() | nil,
           handler_count: non_neg_integer(),
-          message_id: String.t(),
+          id: String.t(),
           message_type: message_type(),
           partition_key: String.t() | nil,
           payload: binary(),
@@ -34,7 +34,7 @@ defmodule Ming.Message do
         }
 
   @enforce_keys [
-    :message_id,
+    :id,
     :message_type,
     :payload,
     :routing_key,
@@ -43,7 +43,7 @@ defmodule Ming.Message do
   ]
 
   defstruct [
-    :message_id,
+    :id,
     :message_type,
     :payload,
     :routing_key,

@@ -7,10 +7,10 @@ defmodule Ming.MessageMapper do
   @doc """
   Convert a map to a `Message`
   """
-  @callback to_message(map :: any()) :: {:ok, Message.t()} | {:error, any()}
+  @callback to_message(map :: any()) :: Message.t() | {:error, any()}
 
   @doc """
   Convert a `Message` to a `any()`
   """
-  @callback to_map(message :: Message.t()) :: {:ok, any()} | {:error, any()}
+  @callback to_map(message :: Message.t()) :: any() | {:error, any()}
 end

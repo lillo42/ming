@@ -4,6 +4,7 @@ defmodule Ming.Pipeline.MapMessage do
   """
   @behaviour Ming.Pipeline.Middleware
 
+  alias Ming.Message
   alias Ming.Pipeline
 
   import Ming.Pipeline
@@ -35,7 +36,7 @@ defmodule Ming.Pipeline.MapMessage do
     %Pipeline{message_mapper: mapper, request: request} = pipeline
 
     case mapper.to_message(request) do
-      {:ok, message} ->
+      %Message{} = message ->
         %Pipeline{pipeline | message: message}
 
       {:error, error} ->
