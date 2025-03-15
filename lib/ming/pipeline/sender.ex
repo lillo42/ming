@@ -21,21 +21,23 @@ defmodule Ming.Pipeline.Sender do
     assign_producer(pipeline, producers)
   end
 
-  defp assign_producer(%Pipeline{} = pipeline, []) do
+  defp assign_producer(%Pipeline{} = pipeline, producers)
+       when producers == [] or is_nil(producers) do
     pipeline
-    |> halt()
-    |> respond({:error, :message_producer_not_found})
+    |> halt(:message_producer_not_found)
   end
 
-  defp assign_producer(%Pipeline{message: message} = pipeline, [producer | producers]) do
+  defp assign_producer(%Pipeline{message: message} = pipeline, [
+         {producer, config, publications} | producers
+       ]) do
     publication =
-      elem(producer, 2)
+      publications
       |> Enum.find(fn p -> p.routing_key == message.routing_key end)
 
     if is_nil(publication) do
       assign_producer(pipeline, producers)
     else
-      %Pipeline{pipeline | message_producer: {elem(producer, 0), elem(producer, 1), publication}}
+      %Pipeline{pipeline | message_producer: {producer, config, publication}}
     end
   end
 

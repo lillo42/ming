@@ -58,13 +58,14 @@ defmodule Ming.Pipeline do
 
   Prevents dispatch of the command if `halt` occurs in a `before_dispatch` callback.
   """
-  def halt(%__MODULE__{} = pipeline) do
-    %__MODULE__{pipeline | halted: true} |> respond({:error, :halted})
+  def halt(%__MODULE__{} = pipeline, reason \\ :halted) do
+    %__MODULE__{pipeline | halted: true} |> respond({:error, reason})
   end
 
   @doc """
   Extract the response from the pipeline
   """
+  def response(%__MODULE__{response: nil}), do: :ok
   def response(%__MODULE__{response: response}), do: response
 
   @doc """
@@ -74,7 +75,7 @@ defmodule Ming.Pipeline do
     %__MODULE__{pipeline | response: response}
   end
 
-  def respond(%__MODULE__{}, _response), do: :ok
+  def respond(%__MODULE__{} = pipeline, _response), do: pipeline
 
   @doc """
   Executes the middleware chain.

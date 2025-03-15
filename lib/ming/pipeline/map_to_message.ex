@@ -1,4 +1,4 @@
-defmodule Ming.Pipeline.MapMessage do
+defmodule Ming.Pipeline.MapToMessage do
   @moduledoc """
   An internal `Ming.Pipeline.Middleware` that map the `orignal_request` to `Message`.
   """
@@ -19,7 +19,7 @@ defmodule Ming.Pipeline.MapMessage do
   end
 
   defp fetch_message_mapper(%Pipeline{} = pipeline) do
-    mapper = Application.get_env(:ming, :message_map)
+    mapper = Application.get_env(:ming, :message_mapper)
 
     if is_nil(mapper) do
       pipeline

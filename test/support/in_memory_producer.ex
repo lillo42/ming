@@ -5,9 +5,7 @@ defmodule Ming.InMemoryProducer do
     send(message, publication, config)
   end
 
-  require Logger
-
   def send(_message, _publication, _config) do
-    Logger.warning("message send")
+    :ok
   end
 end

@@ -4,7 +4,7 @@ defmodule Ming.JsonMapper do
   alias Ming.Message
 
   def to_map(%Message{} = message) do
-    Jason.decoded!(message.payload)
+    Jason.decode!(message.payload)
   end
 
   def to_message(map) do
