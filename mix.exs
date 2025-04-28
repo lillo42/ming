@@ -50,7 +50,7 @@ defmodule Ming.MixProject do
 
   defp package do
     [
-      maintainers: ["Rafael Lillo"],
+      maintainers: ["Rafael Andrade"],
       licenses: ["GPL-3.0"],
       links: %{"GitHub" => @source_url},
       files:

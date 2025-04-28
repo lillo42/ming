@@ -5,44 +5,71 @@ defmodule Ming.Pipeline.Dispatcher do
 
   alias Ming.Pipeline
 
-  def dispatch(request, metadata, middlewares) do
-    pipeline = %Pipeline{request: request, metadata: metadata}
+  defmodule Payload do
+    @moduledoc false
 
-    pipeline = before_dispatch(pipeline, middlewares)
+    @type t :: %Payload{}
+
+    defstruct [
+      :application,
+      :command,
+      :handler_module,
+      :handler_function,
+      :handler_before_execute,
+      :timeout,
+      :metadata,
+      :retry_attempts,
+      middleware: []
+    ]
+  end
+
+  def dispatch(%Ming.Pipeline.Dispatcher.Payload{} = payload) do
+    pipeline = to_pipeline(payload)
+
+    pipeline = before_dispatch(pipeline, payload)
 
     if not Pipeline.halted?(pipeline) do
       pipeline
-      |> after_dispatch(middlewares)
+      |> after_dispatch(payload)
+      |> Pipeline.respond(:ok)
       |> Pipeline.response()
     else
       pipeline
-      |> after_failure(middlewares)
+      |> after_failure(payload)
       |> Pipeline.response()
     end
   end
 
-  defp before_dispatch(%Pipeline{} = pipeline, middlewares) do
-    Pipeline.chain(pipeline, :before_dispatch, middlewares)
+  defp to_pipeline(%Payload{} = payload) do
+    struct(Pipeline, Map.from_struct(payload))
   end
 
-  defp after_dispatch(%Pipeline{} = pipeline, middleware) do
+  defp before_dispatch(%Pipeline{} = pipeline, %Payload{middleware: middleware}) do
+    Pipeline.chain(pipeline, :before_dispatch, middleware)
+  end
+
+  defp after_dispatch(%Pipeline{} = pipeline, %Payload{middleware: middleware}) do
     Pipeline.chain(pipeline, :after_dispatch, middleware)
   end
 
-  defp after_failure(%Pipeline{response: {:error, error}} = pipeline, middleware) do
+  defp after_failure(%Pipeline{response: {:error, error}} = pipeline, %Payload{
+         middleware: middleware
+       }) do
     pipeline
     |> Pipeline.assign(:error, error)
     |> Pipeline.chain(:after_failure, middleware)
   end
 
-  defp after_failure(%Pipeline{response: {:error, error, reason}} = pipeline, middleware) do
+  defp after_failure(%Pipeline{response: {:error, error, reason}} = pipeline, %Payload{
+         middleware: middleware
+       }) do
     pipeline
     |> Pipeline.assign(:error, error)
     |> Pipeline.assign(:error_reason, reason)
     |> Pipeline.chain(:after_failure, middleware)
   end
 
-  defp after_failure(%Pipeline{} = pipeline, middleware) do
+  defp after_failure(%Pipeline{} = pipeline, %Payload{middleware: middleware}) do
     Pipeline.chain(pipeline, :after_failure, middleware)
   end
 end

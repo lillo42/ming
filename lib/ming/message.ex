@@ -13,12 +13,12 @@ defmodule Ming.Message do
   @type message_type :: :unacceptable | :none | :command | :event | :document | :quit
 
   @type t :: %{
-          extra_headers: map(),
           content_type: String.t() | nil,
           correlation_id: String.t() | nil,
           data_schema: URI.t() | nil,
           data_ref: String.t() | nil,
           delayed: Duration.t() | nil,
+          extra_headers: map(),
           handler_count: non_neg_integer(),
           id: String.t(),
           message_type: message_type(),
