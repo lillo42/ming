@@ -3,6 +3,7 @@ defmodule Ming.Dispatch do
 
   alias Ming.Dispatch.Payload
   alias Ming.ExecutionContext
+  alias Ming.Handler
   alias Ming.Pipeline
   alias Ming.Telemetry
 
@@ -64,57 +65,16 @@ defmodule Ming.Dispatch do
     %Pipeline{application: application} = pipeline
     %Payload{timeout: timeout} = payload
 
-    task_dispatcher_name = Module.concat([application, Commanded.Commands.TaskDispatcher])
-
-    task =
-      Task.Supervisor.async_nolink(task_dispatcher_name, Aggregate, :execute, [
-        application,
-        aggregate_module,
-        aggregate_uuid,
-        context,
-        timeout
-      ])
-
-    result =
-      case Task.yield(task, timeout) || Task.shutdown(task) do
-        {:ok, result} ->
-          result
-
-        {:exit, {:normal, :aggregate_stopped}} = result ->
-          result
-
-        {:exit, {{:nodedown, _node_name}, {GenServer, :call, _}}} ->
-          {:error, :remote_node_down}
-
-        {:exit, _reason} ->
-          {:error, :aggregate_execution_failed}
-
-        nil ->
-          {:error, :aggregate_execution_timeout}
-      end
+    result = Handler.execute(application, context, timeout)
 
     case result do
-      {:ok, aggregate_version, events, aggregate_state} ->
+      {:ok, response} ->
         pipeline
-        |> Pipeline.assign(:aggregate_version, aggregate_version)
-        |> Pipeline.assign(:events, events)
-        |> Pipeline.assign(:aggregate_state, aggregate_state)
+        |> Pipeline.assign(:response, response)
         |> after_dispatch(payload)
         |> Pipeline.respond(:ok)
 
-      {:ok, aggregate_version, events, aggregate_state, reply} ->
-        pipeline
-        |> Pipeline.assign(:aggregate_version, aggregate_version)
-        |> Pipeline.assign(:events, events)
-        |> Pipeline.assign(:aggregate_state, aggregate_state)
-        |> after_dispatch(payload)
-        |> Pipeline.respond({:ok, reply})
-
-      {:exit, {:normal, :aggregate_stopped}} ->
-        # Maybe retry command when aggregate process stopped by lifespan timeout
-        maybe_retry(pipeline, payload, context)
-
-      {:error, :remote_node_down} ->
+      {:error, :handler_execution_timeout} ->
         # Maybe retry command when aggregate process not found on a remote node
         maybe_retry(pipeline, payload, context)
 
@@ -132,7 +92,7 @@ defmodule Ming.Dispatch do
   end
 
   defp to_execution_context(%Pipeline{} = pipeline, %Payload{} = payload) do
-    %Pipeline{command: command, command_uuid: command_uuid, metadata: metadata} = pipeline
+    %Pipeline{response: request, request_uuid: resquest_uuid, metadata: metadata} = pipeline
 
     %Payload{
       correlation_id: correlation_id,
@@ -145,6 +105,7 @@ defmodule Ming.Dispatch do
 
     %ExecutionContext{
       request: request,
+      causation_id: resquest_uuid,
       correlation_id: correlation_id,
       metadata: metadata,
       handler: handler_module,

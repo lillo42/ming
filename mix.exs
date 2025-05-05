@@ -33,7 +33,9 @@ defmodule Ming.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      # Telemetry
       {:telemetry, "~> 0.4 or ~> 1.0"},
+      {:telemetry_registry, "~> 0.2 or ~> 0.3"},
       {:jason, "~> 1.0", only: :test},
       {:ex_doc, "~> 0.20", only: :docs}
     ]
