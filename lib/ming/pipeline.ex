@@ -1,30 +1,42 @@
 defmodule Ming.Pipeline do
   @moduledoc """
   Pipeline is a struct used as an argument in the callback functions of modules
-  implementing the `Ming.Pipeline.Middleware` behaviour.
-  """
-  @type t :: %{
-          assign: map(),
-          halted: boolean(),
-          message: Ming.Message.t() | nil,
-          message_mapper: module() | nil,
-          message_producer: module() | nil,
-          metadata: map(),
-          request: any(),
-          response: any()
-        }
+  implementing the `Ming.Middleware` behaviour.
 
-  @enforce_keys [:request]
+  This struct must be returned by each function to be used in the next
+  middleware based on the configured middleware chain.
+
+  ## Pipeline fields
+
+    - `application` - the Ming application.
+    
+    - `assigns` - shared user data as a map.
+
+    - `correlation_id` - an optional UUID used to correlate related
+       commands/events together.
+
+    - `request` - command struct being dispatched.
+
+    - `request_uuid` - UUID assigned to the command being dispatched.
+
+    - `consistency` - requested dispatch consistency, either: `:eventual`
+       (default) or `:strong`.
+
+    - `halted` - flag indicating whether the pipeline was halted.
+
+    - `metadata` - the metadata map to be persisted along with the events.
+
+    - `response` - sets the response to send back to the caller.
+  """
 
   defstruct [
-    :message,
-    :message_mapper,
-    :message_producer,
+    :application,
+    :correlation_id,
     :request,
+    :request_uuid,
+    :metadata,
     :response,
-    :mapper,
     assigns: %{},
-    metadata: %{},
     halted: false
   ]
 
@@ -54,18 +66,19 @@ defmodule Ming.Pipeline do
   def halted?(%__MODULE__{halted: halted}), do: halted
 
   @doc """
+
   Halts the pipeline by preventing further middleware downstream from being invoked.
+
 
   Prevents dispatch of the command if `halt` occurs in a `before_dispatch` callback.
   """
-  def halt(%__MODULE__{} = pipeline, reason \\ :halted) do
-    %__MODULE__{pipeline | halted: true} |> respond({:error, reason})
+  def halt(%__MODULE__{} = pipeline) do
+    %__MODULE__{pipeline | halted: true} |> respond({:error, :halted})
   end
 
   @doc """
   Extract the response from the pipeline
   """
-  def response(%__MODULE__{response: nil}), do: :ok
   def response(%__MODULE__{response: response}), do: response
 
   @doc """
@@ -82,8 +95,9 @@ defmodule Ming.Pipeline do
   """
   def chain(pipeline, stage, middleware)
   def chain(%__MODULE__{} = pipeline, _stage, []), do: pipeline
-  def chain(%__MODULE__{halted: true} = pipeline, :before_dispatch, []), do: pipeline
-  def chain(%__MODULE__{halted: true} = pipeline, :after_dispatch, []), do: pipeline
+  def chain(%__MODULE__{halted: true} = pipeline, :before_dispatch, _middleware), do: pipeline
+
+  def chain(%__MODULE__{halted: true} = pipeline, :after_dispatch, _middleware), do: pipeline
 
   def chain(%__MODULE__{} = pipeline, stage, [module | modules]) do
     chain(apply(module, stage, [pipeline]), stage, modules)
