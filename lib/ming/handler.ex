@@ -49,6 +49,7 @@ defmodule Ming.Handler do
 
   require Logger
 
+  alias ElixirSense.Log
   alias Ming.ExecutionContext
   alias Ming.Telemetry
 
@@ -96,6 +97,8 @@ defmodule Ming.Handler do
     result = do_execute(context)
 
     telemetry_stop(start_time, telemetry_metadata, result)
+
+    result
   end
 
   defp do_execute(%ExecutionContext{} = context) do

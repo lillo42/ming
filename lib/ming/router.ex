@@ -67,7 +67,8 @@ defmodule Ming.Router do
       :ok = BankApp.send(command, metadata: %{"ip_address" => "127.0.0.1"})
 
   """
-  alias Ming.Dispatch.Payload
+  require Logger
+  alias Ming.Dispatcher.Payload
   alias Ming.Telemetry
   alias Ming.UUID
 
@@ -96,7 +97,8 @@ defmodule Ming.Router do
         metadata: %{},
         retry_attempts: unquote(retry_attempts),
         concurrency_timeout: unquote(concurrency_timeout),
-        max_concurrency: unquote(max_concurrency)
+        max_concurrency: unquote(max_concurrency),
+        before_execute: nil
       ]
     end
   end
@@ -428,69 +430,25 @@ defmodule Ming.Router do
 
         if Enum.count(opts) == 1 do
           @request_opts Enum.at(opts, 0)
-          @handler Keyword.fetch!(@request_opts, :to)
-          @function Keyword.fetch!(@request_opts, :function)
-          @before_execute Keyword.fetch!(@request_opts, :before_execute)
 
           defp do_dispatch(%@request_module{} = command, :send, opts) do
-            alias Ming.Dispatch
-            alias Ming.Dispatch.Payload
-
-            opts = Keyword.merge(@request_opts, opts)
-
-            application = Keyword.fetch!(opts, :application)
-            command_uuid = Keyword.get_lazy(opts, :request_uuid, &UUID.uuid4/0)
-            correlation_id = Keyword.get_lazy(opts, :correlation_id, &UUID.uuid4/0)
-            metadata = Keyword.fetch!(opts, :metadata) |> validate_metadata()
-            retry_attempts = Keyword.get(opts, :retry_attempts)
-            timeout = Keyword.fetch!(opts, :timeout)
-
-            payload = %Payload{
-              application: application,
-              request: command,
-              request_uuid: command_uuid,
-              correlation_id: correlation_id,
-              metadata: metadata,
-              timeout: timeout,
-              retry_attempts: retry_attempts,
-              handler_module: @handler,
-              handler_function: @function,
-              handler_before_execute: @before_execute,
-              middleware: @registered_send_middleware
-            }
-
-            Dispatcher.dispatch(payload)
+            do_dispatch(
+              command,
+              Keyword.put(@request_opts, :middleware, @registered_send_middleware),
+              opts
+            )
           end
 
           defp do_dispatch(%@request_module{} = event, :publish, opts) do
-            alias Ming.Dispatch
-            alias Ming.Dispatch.Payload
+            case do_dispatch(
+                   event,
+                   Keyword.put(@request_opts, :middleware, @registered_publish_middleware),
+                   opts
+                 ) do
+              :ok ->
+                :ok
 
-            opts = Keyword.merge(@request_opts, opts)
-
-            application = Keyword.fetch!(opts, :application)
-            event_uuid = Keyword.get_lazy(opts, :request_uuid, &UUID.uuid4/0)
-            correlation_id = Keyword.get_lazy(opts, :correlation_id, &UUID.uuid4/0)
-            metadata = Keyword.fetch!(opts, :metadata) |> validate_metadata()
-            retry_attempts = Keyword.get(opts, :retry_attempts)
-            timeout = Keyword.fetch!(opts, :timeout)
-
-            payload = %Payload{
-              application: application,
-              request: event,
-              request_uuid: event_uuid,
-              correlation_id: correlation_id,
-              metadata: metadata,
-              timeout: timeout,
-              retry_attempts: retry_attempts,
-              handler_module: @handler,
-              handler_function: @function,
-              handler_before_execute: @before_execute,
-              middleware: @registered_publish_middleware
-            }
-
-            case Dispatcher.dispatch(payload) do
-              :ok | {:ok, _resp} ->
+              {:ok, _resp} ->
                 :ok
 
               resp ->
@@ -505,50 +463,37 @@ defmodule Ming.Router do
           end
 
           defp do_dispatch(%@request_module{} = event, :publish, opts) do
-            alias Ming.Dispatch
-            alias Ming.Dispatch.Payload
-
             opts = Keyword.merge(@default_dispatch_opts, opts)
 
             concurrency_timeout = Keyword.get(opts, :concurrency_timeout)
             max_concurrency = Keyword.get(opts, :max_concurrency, System.schedulers_online())
 
             resp =
-              Task.async_stream(
-                @request_opts,
-                fn request_opts ->
-                  handler = Keyword.fetch!(request_opts, :to)
-                  function = Keyword.fetch!(request_opts, :function)
-                  before_execute = Keyword.fetch!(request_opts, :before_execute)
-
-                  opts = Keyword.merge(request_opts, opts)
-
-                  application = Keyword.fetch!(opts, :application)
-                  event_uuid = Keyword.get_lazy(opts, :request_uuid, &UUID.uuid4/0)
-                  correlation_id = Keyword.get_lazy(opts, :correlation_id, &UUID.uuid4/0)
-                  metadata = Keyword.fetch!(opts, :metadata) |> validate_metadata()
-                  retry_attempts = Keyword.get(opts, :retry_attempts)
-                  timeout = Keyword.fetch!(opts, :timeout)
-
-                  payload = %Payload{
-                    application: application,
-                    request: event,
-                    request_uuid: event_uuid,
-                    correlation_id: correlation_id,
-                    metadata: metadata,
-                    timeout: timeout,
-                    retry_attempts: retry_attempts,
-                    handler_module: handler,
-                    handler_function: function,
-                    handler_before_execute: before_execute,
-                    middleware: @registered_publish_middleware
-                  }
-
-                  Dispatcher.dispatch(payload)
-                end,
-                max_concurrency: max_concurrency,
-                timeout: concurrency_timeout
-              )
+              if max_concurrency == 1 do
+                Enum.map(
+                  @request_opts,
+                  fn request_opts ->
+                    do_dispatch(
+                      event,
+                      Keyword.put(request_opts, :middleware, @registered_publish_middleware),
+                      opts
+                    )
+                  end
+                )
+              else
+                Task.async_stream(
+                  @request_opts,
+                  fn request_opts ->
+                    do_dispatch(
+                      event,
+                      Keyword.put(request_opts, :middleware, @registered_publish_middleware),
+                      opts
+                    )
+                  end,
+                  max_concurrency: max_concurrency,
+                  timeout: concurrency_timeout
+                )
+              end
 
             resp =
               resp
@@ -596,6 +541,41 @@ defmodule Ming.Router do
 
       defp do_dispatch(request, :publish, opts) do
         :ok
+      end
+
+      defp do_dispatch(request, default_opts, opts) do
+        alias Ming.Dispatcher
+        alias Ming.Dispatcher.Payload
+
+        handler = Keyword.fetch!(default_opts, :to)
+        function = Keyword.fetch!(default_opts, :function)
+        before_execute = Keyword.fetch!(default_opts, :before_execute)
+        middlewares = Keyword.fetch!(default_opts, :middleware)
+
+        opts = Keyword.merge(default_opts, opts)
+
+        application = Keyword.fetch!(opts, :application)
+        request_uuid = Keyword.get_lazy(opts, :request_uuid, &UUID.uuid4/0)
+        correlation_id = Keyword.get_lazy(opts, :correlation_id, &UUID.uuid4/0)
+        metadata = Keyword.fetch!(opts, :metadata) |> validate_metadata()
+        retry_attempts = Keyword.get(opts, :retry_attempts)
+        timeout = Keyword.fetch!(opts, :timeout)
+
+        payload = %Payload{
+          application: application,
+          request: request,
+          request_uuid: request_uuid,
+          correlation_id: correlation_id,
+          metadata: metadata,
+          timeout: timeout,
+          retry_attempts: retry_attempts,
+          handler_module: handler,
+          handler_function: function,
+          handler_before_execute: before_execute,
+          middleware: middlewares
+        }
+
+        Dispatcher.dispatch(payload)
       end
 
       defp errors?(:ok), do: false

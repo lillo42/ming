@@ -1,7 +1,7 @@
-defmodule Ming.Dispatch do
+defmodule Ming.Dispatcher do
   @moduledoc false
 
-  alias Ming.Dispatch.Payload
+  alias Ming.Dispatcher.Payload
   alias Ming.ExecutionContext
   alias Ming.Handler
   alias Ming.Pipeline
@@ -92,7 +92,7 @@ defmodule Ming.Dispatch do
   end
 
   defp to_execution_context(%Pipeline{} = pipeline, %Payload{} = payload) do
-    %Pipeline{response: request, request_uuid: resquest_uuid, metadata: metadata} = pipeline
+    %Pipeline{request: request, request_uuid: resquest_uuid, metadata: metadata} = pipeline
 
     %Payload{
       correlation_id: correlation_id,
