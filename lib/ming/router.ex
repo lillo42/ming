@@ -398,11 +398,11 @@ defmodule Ming.Router do
         do: do_dispatch(command, :send, timeout: :infinity)
 
       @doc false
-      def dispatch(command, timeout) when is_integer(timeout),
+      def send(command, timeout) when is_integer(timeout),
         do: do_dispatch(command, :send, timeout: timeout)
 
       @doc false
-      def dispatch(command, opts),
+      def send(command, opts),
         do: do_dispatch(command, :send, opts)
 
       @doc false
@@ -417,7 +417,7 @@ defmodule Ming.Router do
         do: do_dispatch(event, :publish, timeout: timeout)
 
       @doc false
-      def dispatch(event, opts),
+      def publish(event, opts),
         do: do_dispatch(event, :publish, opts)
 
       for {command_module, opts} <-

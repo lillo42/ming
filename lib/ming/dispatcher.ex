@@ -68,11 +68,17 @@ defmodule Ming.Dispatcher do
     result = Handler.execute(application, context, timeout)
 
     case result do
-      {:ok, response} ->
+      {:ok, response} when response == [] or is_nil(response) or response == :ok ->
         pipeline
         |> Pipeline.assign(:response, response)
         |> after_dispatch(payload)
         |> Pipeline.respond(:ok)
+
+      {:ok, response} ->
+        pipeline
+        |> Pipeline.assign(:response, response)
+        |> after_dispatch(payload)
+        |> Pipeline.respond({:ok, response})
 
       {:error, :handler_execution_timeout} ->
         # Maybe retry command when aggregate process not found on a remote node

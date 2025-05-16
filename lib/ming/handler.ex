@@ -49,7 +49,6 @@ defmodule Ming.Handler do
 
   require Logger
 
-  alias ElixirSense.Log
   alias Ming.ExecutionContext
   alias Ming.Telemetry
 
