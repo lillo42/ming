@@ -1,4 +1,4 @@
 defmodule Ming.ReturningNonEmptyListHandler do
-  def execute(%Ming.ExampleCommand1{}), do: [:some_reply]
-  def execute(%Ming.ExampleEvent1{}), do: [:some_reply]
+  def execute(%Ming.ExampleCommand1{}, _context), do: [:some_reply]
+  def execute(%Ming.ExampleEvent1{}, _context), do: [:some_reply]
 end

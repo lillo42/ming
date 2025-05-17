@@ -98,7 +98,8 @@ defmodule Ming.Router do
         retry_attempts: unquote(retry_attempts),
         concurrency_timeout: unquote(concurrency_timeout),
         max_concurrency: unquote(max_concurrency),
-        before_execute: nil
+        before_execute: nil,
+        returning: false
       ]
     end
   end
@@ -560,6 +561,7 @@ defmodule Ming.Router do
         metadata = Keyword.fetch!(opts, :metadata) |> validate_metadata()
         retry_attempts = Keyword.get(opts, :retry_attempts)
         timeout = Keyword.fetch!(opts, :timeout)
+        returning = Keyword.get(opts, :returning)
 
         payload = %Payload{
           application: application,
@@ -572,7 +574,8 @@ defmodule Ming.Router do
           handler_module: handler,
           handler_function: function,
           handler_before_execute: before_execute,
-          middleware: middlewares
+          middleware: middlewares,
+          returning: returning
         }
 
         Dispatcher.dispatch(payload)
