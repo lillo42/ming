@@ -51,6 +51,9 @@ defmodule Ming.CompositeRouter do
   alias Ming.Router
 
   defmacro __using__(opts) do
+    max_concurrency = Keyword.get(opts, :max_concurrency, 1)
+    concurrency_timeout = Keyword.get(opts, :concurrency_timeout, 5_000)
+
     quote do
       require Logger
 
@@ -64,6 +67,11 @@ defmodule Ming.CompositeRouter do
         unquote(opts)
         |> Keyword.get(:default_dispatch_opts, [])
         |> Keyword.put(:application, application)
+
+      @internal_dispatch_opts [
+        max_concurrency: unquote(max_concurrency),
+        concurrency_timeout: unquote(concurrency_timeout)
+      ]
 
       @default_dispatch_opts default_dispatch_opts
       @registered_commands %{}
@@ -159,18 +167,24 @@ defmodule Ming.CompositeRouter do
           defp do_dispatch(request, :publish, opts) do
             opts = Keyword.merge(@default_dispatch_opts, opts)
 
-            concurrency_timeout = Keyword.get(opts, :concurrency_timeout)
-            max_concurrency = Keyword.get(opts, :max_concurrency, System.schedulers_online())
+            max_concurrency = Keyword.get(@internal_dispatch_opts, :max_concurrency)
+            concurrency_timeout = Keyword.fetch!(@internal_dispatch_opts, :concurrency_timeout)
 
             resp =
-              Task.async_stream(
-                @routers,
-                fn router ->
+              if max_concurrency == 1 do
+                Enum.map(@routers, fn router ->
                   router.publish(request, opts)
-                end,
-                max_concurrency: max_concurrency,
-                timeout: concurrency_timeout
-              )
+                end)
+              else
+                Task.async_stream(
+                  @routers,
+                  fn router ->
+                    router.publish(request, opts)
+                  end,
+                  max_concurrency: max_concurrency,
+                  timeout: concurrency_timeout
+                )
+              end
 
             resp =
               resp

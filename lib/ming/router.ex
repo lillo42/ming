@@ -77,7 +77,7 @@ defmodule Ming.Router do
     timeout = Keyword.get(opts, :timeout, 5_000)
     retry_attempts = Keyword.get(opts, :retry, 10)
     concurrency_timeout = Keyword.get(opts, :concurrency_timeout, 30_000)
-    max_concurrency = Keyword.get(opts, :max_concurrency)
+    max_concurrency = Keyword.get(opts, :max_concurrency, 1)
 
     quote do
       require Logger
@@ -452,8 +452,8 @@ defmodule Ming.Router do
               {:ok, _resp} ->
                 :ok
 
-              resp ->
-                resp
+              {:error, reason} ->
+                {:error, [reason]}
             end
           end
         else
@@ -501,7 +501,7 @@ defmodule Ming.Router do
               |> Enum.filter(fn item -> errors?(item) end)
               |> Enum.map(fn item -> elem(item, 1) end)
 
-            if Enum.empty?(resp) == 0 do
+            if Enum.empty?(resp) do
               :ok
             else
               {:error, resp}
