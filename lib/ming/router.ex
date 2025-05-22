@@ -67,7 +67,6 @@ defmodule Ming.Router do
       :ok = BankApp.send(command, metadata: %{"ip_address" => "127.0.0.1"})
 
   """
-  require Logger
   alias Ming.Dispatcher.Payload
   alias Ming.Telemetry
   alias Ming.UUID
