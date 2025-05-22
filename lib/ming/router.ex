@@ -86,7 +86,7 @@ defmodule Ming.Router do
 
       @before_compile unquote(__MODULE__)
 
-      Module.register_attribute(__MODULE__, :registered_commands, accumulate: true)
+      Module.register_attribute(__MODULE__, :registered_requests, accumulate: true)
       Module.register_attribute(__MODULE__, :registered_send_middleware, accumulate: true)
       Module.register_attribute(__MODULE__, :registered_publish_middleware, accumulate: true)
       Module.register_attribute(__MODULE__, :registered_post_middleware, accumulate: true)
@@ -235,13 +235,13 @@ defmodule Ming.Router do
       end
 
   """
-  defmacro dispatch(command_module_or_modules, opts) do
+  defmacro dispatch(request_module_or_modules, opts) do
     opts = parse_opts(opts, [])
 
-    for command_module <- List.wrap(command_module_or_modules) do
+    for request_module <- List.wrap(request_module_or_modules) do
       quote do
-        @registered_commands {
-          unquote(command_module),
+        @registered_requests {
+          unquote(request_module),
           Keyword.merge(@default_dispatch_opts, unquote(opts))
         }
       end
@@ -385,9 +385,9 @@ defmodule Ming.Router do
   defmacro __before_compile__(_env) do
     quote generated: true do
       @doc false
-      def __registered_commands__ do
-        @registered_commands
-        |> Enum.map(fn {command_module, _opts} -> command_module end)
+      def __registered_requests__ do
+        @registered_requests
+        |> Enum.map(fn {request_module, _opts} -> request_module end)
         |> Enum.uniq()
       end
 
@@ -421,13 +421,13 @@ defmodule Ming.Router do
       def publish(event, opts),
         do: do_dispatch(event, :publish, opts)
 
-      for {command_module, opts} <-
+      for {request_module, opts} <-
             Enum.group_by(
-              @registered_commands,
-              fn {command_module, _opts} -> command_module end,
-              fn {_command_module, opts} -> opts end
+              @registered_requests,
+              fn {request_module, _opts} -> request_module end,
+              fn {_request_module, opts} -> opts end
             ) do
-        @request_module command_module
+        @request_module request_module
 
         if Enum.count(opts) == 1 do
           @request_opts Enum.at(opts, 0)

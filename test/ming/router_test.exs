@@ -1,7 +1,7 @@
 defmodule Ming.RouteTest do
-  require Logger
   use ExUnit.Case
-  doctest Ming
+
+  doctest Ming.Router
 
   describe "send/2" do
     test "a handler returning []" do

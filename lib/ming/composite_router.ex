@@ -51,22 +51,23 @@ defmodule Ming.CompositeRouter do
   alias Ming.Router
 
   defmacro __using__(opts) do
+    otp_app = Keyword.get(opts, :otp_app, :ming)
     max_concurrency = Keyword.get(opts, :max_concurrency, 1)
     concurrency_timeout = Keyword.get(opts, :concurrency_timeout, 5_000)
 
     quote do
       require Logger
 
-      import unquote(opts)
+      import unquote(__MODULE__)
 
       @before_compile unquote(__MODULE__)
 
-      Module.register_attribute(__MODULE__, :registered_commands, accumulate: true)
+      Module.register_attribute(__MODULE__, :registered_requests, accumulate: true)
 
       default_dispatch_opts =
         unquote(opts)
         |> Keyword.get(:default_dispatch_opts, [])
-        |> Keyword.put(:application, application)
+        |> Keyword.put(:application, unquote(otp_app))
 
       @internal_dispatch_opts [
         max_concurrency: unquote(max_concurrency),
@@ -88,8 +89,8 @@ defmodule Ming.CompositeRouter do
   """
   defmacro router(router_module) do
     quote location: :keep do
-      for command <- unquote(router_module).__registered_commands__() do
-        @registered_commands {command, unquote(router_module)}
+      for request <- unquote(router_module).__registered_requests__() do
+        @registered_requests {request, unquote(router_module)}
       end
     end
   end
@@ -97,9 +98,9 @@ defmodule Ming.CompositeRouter do
   defmacro __before_compile__(_env) do
     quote generated: true do
       @doc false
-      def __registered_commands__ do
-        @registered_commands
-        |> Enum.map(fn {command_module, _router} -> command_module end)
+      def __registered_requests__ do
+        @registered_requests
+        |> Enum.map(fn {request_module, _router} -> request_module end)
         |> Enum.uniq()
       end
 
@@ -141,18 +142,24 @@ defmodule Ming.CompositeRouter do
       def publish(event, opts),
         do: do_dispatch(event, :publish, opts)
 
-      for {command_module, routers} <- @registered_commands do
-        @command_module command_module
+      for {request_module, routers} <-
+            Enum.group_by(
+              @registered_requests,
+              fn {request_module, _router_module} -> request_module end,
+              fn {_request_module, router_module} -> router_module end
+            ) do
+        @request_module request_module
 
         if Enum.count(routers) == 1 do
           @router Enum.at(routers, 0)
-          defp do_dispatch(request, :send, opts) do
+
+          defp do_dispatch(%@request_module{} = request, :send, opts) do
             opts = Keyword.merge(@default_dispatch_opts, opts)
 
             @router.send(request, opts)
           end
 
-          defp do_dispatch(request, :publish, opts) do
+          defp do_dispatch(%@request_module{} = request, :publish, opts) do
             opts = Keyword.merge(@default_dispatch_opts, opts)
 
             @router.publish(request, opts)
@@ -160,11 +167,11 @@ defmodule Ming.CompositeRouter do
         else
           @routers routers
 
-          defp do_dispatch(request, :send, opts) do
+          defp do_dispatch(%@request_module{} = request, :send, opts) do
             {:error, :more_than_one_handler_founded}
           end
 
-          defp do_dispatch(request, :publish, opts) do
+          defp do_dispatch(%@request_module{} = request, :publish, opts) do
             opts = Keyword.merge(@default_dispatch_opts, opts)
 
             max_concurrency = Keyword.get(@internal_dispatch_opts, :max_concurrency)
