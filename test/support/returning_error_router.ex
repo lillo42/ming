@@ -1,4 +1,6 @@
 defmodule Ming.ReturningErrorRouter do
+  @moduledoc false
+
   use Ming.Router
 
   alias Ming.ExampleCommand1

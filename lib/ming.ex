@@ -1,5 +1,3 @@
 defmodule Ming do
-  @moduledoc """
-
-  """
+  @moduledoc false
 end

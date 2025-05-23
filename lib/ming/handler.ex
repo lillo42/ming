@@ -105,7 +105,9 @@ defmodule Ming.Handler do
 
     Logger.debug("executing request: " <> inspect(request))
 
-    with :ok <- before_execute_command(context) do
+    reply = before_execute_command(context)
+
+    if reply == :ok do
       case apply(handler, function, [request, context]) do
         {:error, _error} = reply ->
           reply
@@ -120,8 +122,7 @@ defmodule Ming.Handler do
           {:ok, response}
       end
     else
-      {:error, _error} = reply ->
-        reply
+      reply
     end
   rescue
     error ->

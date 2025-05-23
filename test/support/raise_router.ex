@@ -1,4 +1,6 @@
 defmodule Ming.RaiseRouter do
+  @moduledoc false
+
   use Ming.Router
 
   alias Ming.ExampleCommand1

@@ -1,4 +1,6 @@
 defmodule Ming.ReturningNonEmptyListRouter do
+  @moduledoc false
+
   use Ming.Router
 
   alias Ming.ExampleCommand1

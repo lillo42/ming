@@ -1,4 +1,6 @@
 defmodule Ming.ReturningNilRouter do
+  @moduledoc false
+
   use Ming.Router
 
   alias Ming.ExampleCommand1

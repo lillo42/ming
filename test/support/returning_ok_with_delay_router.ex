@@ -1,4 +1,6 @@
 defmodule Ming.ReturningOkWithDelayRouter do
+  @moduledoc false
+
   use Ming.Router
 
   alias Ming.ExampleCommand1
