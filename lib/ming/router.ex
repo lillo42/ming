@@ -382,118 +382,104 @@ defmodule Ming.Router do
             ) :: publish_resp()
 
   defmacro __before_compile__(_env) do
-    quote generated: true do
-      @doc false
-      def __registered_requests__ do
-        @registered_requests
-        |> Enum.map(fn {request_module, _opts} -> request_module end)
-        |> Enum.uniq()
-      end
+    send_functions =
+      quote generated: true, location: :keep do
+        @doc false
+        def send(command, opts \\ [])
 
-      @doc false
-      def send(command, opts \\ [])
+        @doc false
+        def send(command, :infinity) do
+          do_send(command, timeout: :infinity)
+        end
 
-      @doc false
-      def send(command, :infinity),
-        do: do_dispatch(command, :send, timeout: :infinity)
+        @doc false
+        def send(command, timeout) when is_integer(timeout) do
+          do_send(command, timeout: timeout)
+        end
 
-      @doc false
-      def send(command, timeout) when is_integer(timeout),
-        do: do_dispatch(command, :send, timeout: timeout)
+        @doc false
+        def send(command, opts) do
+          do_send(command, opts)
+        end
 
-      @doc false
-      def send(command, opts),
-        do: do_dispatch(command, :send, opts)
+        for {command_module, command_opts} <- @registered_requests_by_module do
+          @command_module command_module
 
-      @doc false
-      def publish(event, opts \\ [])
+          if Enum.count(command_opts) == 1 do
+            @command_opts Enum.at(command_opts, 0)
+                          |> Keyword.put(:middleware, @registered_send_middleware)
 
-      @doc false
-      def publish(event, :infinity),
-        do: do_dispatch(event, :publish, timeout: :infinity)
-
-      @doc false
-      def publish(event, timeout) when is_integer(timeout),
-        do: do_dispatch(event, :publish, timeout: timeout)
-
-      @doc false
-      def publish(event, opts),
-        do: do_dispatch(event, :publish, opts)
-
-      for {request_module, opts} <-
-            Enum.group_by(
-              @registered_requests,
-              fn {request_module, _opts} -> request_module end,
-              fn {_request_module, opts} -> opts end
-            ) do
-        @request_module request_module
-
-        if Enum.count(opts) == 1 do
-          @request_opts Enum.at(opts, 0)
-
-          defp do_dispatch(%@request_module{} = command, :send, opts) do
-            do_dispatch(
-              command,
-              Keyword.put(@request_opts, :middleware, @registered_send_middleware),
-              opts
-            )
-          end
-
-          defp do_dispatch(%@request_module{} = event, :publish, opts) do
-            case do_dispatch(
-                   event,
-                   Keyword.put(@request_opts, :middleware, @registered_publish_middleware),
-                   opts
-                 ) do
-              :ok ->
-                :ok
-
-              {:ok, _resp} ->
-                :ok
-
-              {:error, reason} ->
-                {:error, [reason]}
+            defp do_send(%@command_module{} = command, opts) do
+              do_dispatch(command, @command_opts, opts)
+            end
+          else
+            defp do_send(%@command_module{}, _opts) do
+              {:error, :more_than_one_handler_founded}
             end
           end
-        else
-          @request_opts opts
+        end
 
-          defp do_dispatch(%@request_module{}, :send, _opts) do
-            {:error, :more_than_one_handler_founded}
-          end
+        defp do_send(command, opts) do
+          event_prefix = [:ming, :application, :dispatch]
+          application = Keyword.fetch!(opts, :application)
 
-          defp do_dispatch(%@request_module{} = event, :publish, opts) do
+          context = %Ming.ExecutionContext{
+            request: command
+          }
+
+          telemetry_metadata = %{
+            application: application,
+            error: nil,
+            execution_context: context
+          }
+
+          start_time = Telemetry.start(event_prefix, telemetry_metadata)
+
+          Logger.error(fn ->
+            "attempted to dispatch an unregistered request: " <> inspect(command)
+          end)
+
+          Telemetry.stop(
+            event_prefix,
+            start_time,
+            Map.put(telemetry_metadata, :error, :unregistered_command)
+          )
+
+          {:error, :unregistered_command}
+        end
+      end
+
+    publish_function =
+      quote generated: true, location: :keep do
+        @doc false
+        def publish(event, opts \\ [])
+
+        @doc false
+        def publish(event, :infinity),
+          do: do_publish(event, timeout: :infinity)
+
+        @doc false
+        def publish(event, timeout) when is_integer(timeout),
+          do: do_publish(event, timeout: timeout)
+
+        @doc false
+        def publish(event, opts),
+          do: do_publish(event, opts)
+
+        for {event_module, event_opts} <- @registered_requests_by_module do
+          @event_module event_module
+          @event_opts Enum.map(event_opts, fn opts ->
+                        Keyword.put(opts, :middleware, @registered_publish_middleware)
+                      end)
+
+          defp do_publish(%@event_module{} = event, opts) do
             opts = Keyword.merge(@default_dispatch_opts, opts)
 
             concurrency_timeout = Keyword.get(opts, :concurrency_timeout)
-            max_concurrency = Keyword.get(opts, :max_concurrency, System.schedulers_online())
+            max_concurrency = Keyword.get(opts, :max_concurrency, 1)
 
             resp =
-              if max_concurrency == 1 do
-                Enum.map(
-                  @request_opts,
-                  fn request_opts ->
-                    do_dispatch(
-                      event,
-                      Keyword.put(request_opts, :middleware, @registered_publish_middleware),
-                      opts
-                    )
-                  end
-                )
-              else
-                Task.async_stream(
-                  @request_opts,
-                  fn request_opts ->
-                    do_dispatch(
-                      event,
-                      Keyword.put(request_opts, :middleware, @registered_publish_middleware),
-                      opts
-                    )
-                  end,
-                  max_concurrency: max_concurrency,
-                  timeout: concurrency_timeout
-                )
-              end
+              do_batch_dispatch(event, @event_opts, opts, max_concurrency, concurrency_timeout)
 
             resp =
               resp
@@ -507,52 +493,50 @@ defmodule Ming.Router do
             end
           end
         end
+
+        defp do_publish(_event, _opts), do: :ok
       end
 
-      # Catch unregistered request, log and return an error.
-      defp do_dispatch(command, :send, opts) do
-        event_prefix = [:ming, :application, :dispatch]
-        application = Keyword.fetch!(opts, :application)
+    quote generated: true do
+      @doc false
+      def __registered_requests__ do
+        @registered_requests
+        |> Enum.map(fn {request_module, _opts} -> request_module end)
+        |> Enum.uniq()
+      end
 
-        context = %Ming.ExecutionContext{
-          request: command
-        }
+      @registered_requests_by_module Enum.group_by(
+                                       @registered_requests,
+                                       fn {request_module, _opts} -> request_module end,
+                                       fn {_request_module, opts} -> opts end
+                                     )
+      unquote(send_functions)
 
-        telemetry_metadata = %{
-          application: application,
-          error: nil,
-          execution_context: context
-        }
+      unquote(publish_function)
 
-        start_time = Telemetry.start(event_prefix, telemetry_metadata)
+      defp do_batch_dispatch(event, ming_opts, user_opts, 1, _concurrency_timeout) do
+        Enum.map(ming_opts, fn opts -> do_dispatch(event, opts, user_opts) end)
+      end
 
-        Logger.error(fn ->
-          "attempted to dispatch an unregistered request: " <> inspect(command)
-        end)
-
-        Telemetry.stop(
-          event_prefix,
-          start_time,
-          Map.put(telemetry_metadata, :error, :unregistered_command)
+      defp do_batch_dispatch(event, ming_opts, user_opts, max_concurrency, concurrency_timeout) do
+        Task.async_stream(
+          ming_opts,
+          fn opts -> do_dispatch(event, opts, user_opts) end,
+          max_concurrency: max_concurrency,
+          timeout: concurrency_timeout
         )
-
-        {:error, :unregistered_command}
       end
 
-      defp do_dispatch(request, :publish, opts) do
-        :ok
-      end
-
-      defp do_dispatch(request, default_opts, opts) do
+      defp do_dispatch(request, ming_opts, opts) do
         alias Ming.Dispatcher
         alias Ming.Dispatcher.Payload
 
-        handler = Keyword.fetch!(default_opts, :to)
-        function = Keyword.fetch!(default_opts, :function)
-        before_execute = Keyword.fetch!(default_opts, :before_execute)
-        middlewares = Keyword.fetch!(default_opts, :middleware)
+        handler = Keyword.fetch!(ming_opts, :to)
+        function = Keyword.fetch!(ming_opts, :function)
+        before_execute = Keyword.fetch!(ming_opts, :before_execute)
+        middlewares = Keyword.fetch!(ming_opts, :middleware)
 
-        opts = Keyword.merge(default_opts, opts)
+        opts = Keyword.merge(ming_opts, opts)
 
         application = Keyword.fetch!(opts, :application)
         request_uuid = Keyword.get_lazy(opts, :request_uuid, &UUID.uuid4/0)

@@ -42,16 +42,16 @@ defmodule Ming.Dispatcher do
     pipeline = before_dispatch(pipeline, payload)
 
     # Stop command execution if pipeline has been halted
-    unless Pipeline.halted?(pipeline) do
+    if Pipeline.halted?(pipeline) do
+      pipeline
+      |> after_failure(payload)
+      |> telemetry_stop(start_time, telemetry_metadata)
+      |> Pipeline.response()
+    else
       context = to_execution_context(pipeline, payload)
 
       pipeline
       |> execute(payload, context)
-      |> telemetry_stop(start_time, telemetry_metadata)
-      |> Pipeline.response()
-    else
-      pipeline
-      |> after_failure(payload)
       |> telemetry_stop(start_time, telemetry_metadata)
       |> Pipeline.response()
     end
