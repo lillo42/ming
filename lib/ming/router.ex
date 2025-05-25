@@ -495,6 +495,19 @@ defmodule Ming.Router do
         end
 
         defp do_publish(_event, _opts), do: :ok
+
+        defp do_batch_dispatch(event, ming_opts, user_opts, 1, _concurrency_timeout) do
+          Enum.map(ming_opts, fn opts -> do_dispatch(event, opts, user_opts) end)
+        end
+
+        defp do_batch_dispatch(event, ming_opts, user_opts, max_concurrency, concurrency_timeout) do
+          Task.async_stream(
+            ming_opts,
+            fn opts -> do_dispatch(event, opts, user_opts) end,
+            max_concurrency: max_concurrency,
+            timeout: concurrency_timeout
+          )
+        end
       end
 
     quote generated: true do
@@ -513,19 +526,6 @@ defmodule Ming.Router do
       unquote(send_functions)
 
       unquote(publish_function)
-
-      defp do_batch_dispatch(event, ming_opts, user_opts, 1, _concurrency_timeout) do
-        Enum.map(ming_opts, fn opts -> do_dispatch(event, opts, user_opts) end)
-      end
-
-      defp do_batch_dispatch(event, ming_opts, user_opts, max_concurrency, concurrency_timeout) do
-        Task.async_stream(
-          ming_opts,
-          fn opts -> do_dispatch(event, opts, user_opts) end,
-          max_concurrency: max_concurrency,
-          timeout: concurrency_timeout
-        )
-      end
 
       defp do_dispatch(request, ming_opts, opts) do
         alias Ming.Dispatcher

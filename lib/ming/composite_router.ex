@@ -69,7 +69,7 @@ defmodule Ming.CompositeRouter do
         |> Keyword.get(:default_dispatch_opts, [])
         |> Keyword.put(:application, unquote(otp_app))
 
-      @internal_dispatch_opts [
+      @composite_router_opts [
         max_concurrency: unquote(max_concurrency),
         concurrency_timeout: unquote(concurrency_timeout)
       ]
@@ -96,105 +96,93 @@ defmodule Ming.CompositeRouter do
   end
 
   defmacro __before_compile__(_env) do
-    quote generated: true do
-      @doc false
-      def __registered_requests__ do
-        @registered_requests
-        |> Enum.map(fn {request_module, _router} -> request_module end)
-        |> Enum.uniq()
+    send_functions =
+      quote generated: true, location: :keep do
+        @doc """
+        Dispatch a registered command.
+        """
+        @callback send(
+                    command :: struct(),
+                    timeout_or_opts :: non_neg_integer() | :infinity | Keyword.t()
+                  ) :: Router.send_resp()
+
+        def send(command, opts \\ [])
+
+        def send(command, :infinity) do
+          do_send(command, timeout: :infinity)
+        end
+
+        def send(command, timeout) when is_integer(timeout) do
+          do_send(command, timeout: timeout)
+        end
+
+        def send(command, opts) do
+          do_send(command, opts)
+        end
+
+        for {command_module, router_modules} <- @registered_requests_by_module do
+          @command_module command_module
+          if Enum.count(router_modules) == 1 do
+            @router Enum.at(router_modules, 0)
+
+            defp do_send(%@command_module{} = request, opts) do
+              opts = Keyword.merge(@default_dispatch_opts, opts)
+
+              @router.send(request, opts)
+            end
+          else
+            defp do_send(%@command_module{} = request, opts) do
+              {:error, :more_than_one_handler_founded}
+            end
+          end
+        end
+
+        # Catch unregistered commands, log and return an error.
+        defp do_send(request, _opts) do
+          Logger.error(fn ->
+            "attempted to dispatch an unregistered command: " <> inspect(request)
+          end)
+
+          {:error, :unregistered_command}
+        end
       end
 
-      @doc """
-      Dispatch a registered command.
-      """
-      @callback send(
-                  command :: struct(),
-                  timeout_or_opts :: non_neg_integer() | :infinity | Keyword.t()
-                ) :: Router.send_resp()
+    publish_functions =
+      quote generated: true, location: :keep do
+        @doc """
+        Dispatch a registered event.
+        """
+        @callback publish(
+                    event :: struct(),
+                    timeout_or_opts :: non_neg_integer() | :infinity | Keyword.t()
+                  ) :: Router.publish_resp()
 
-      @doc """
-      Dispatch a registered event.
-      """
-      @callback publish(
-                  event :: struct(),
-                  timeout_or_opts :: non_neg_integer() | :infinity | Keyword.t()
-                ) :: Router.publish_resp()
+        def publish(event, opts \\ [])
 
-      def send(command, opts \\ [])
+        def publish(event, :infinity) do
+          do_publish(event, timeout: :infinity)
+        end
 
-      def send(command, :infinity),
-        do: do_dispatch(command, :send, timeout: :infinity)
+        def publish(event, timeout) when is_integer(timeout) do
+          do_publish(event, timeout: timeout)
+        end
 
-      def send(command, timeout) when is_integer(timeout),
-        do: do_dispatch(command, :send, timeout: timeout)
+        def publish(event, opts) do
+          do_publish(event, opts)
+        end
 
-      def send(command, opts),
-        do: do_dispatch(command, :send, opts)
+        for {event_module, router_modules} <- @registered_requests_by_module do
+          @event_module event_module
+          @router_modules router_modules
 
-      def publish(event, opts \\ [])
-
-      def publish(event, :infinity),
-        do: do_dispatch(event, :publish, timeout: :infinity)
-
-      def publish(event, timeout) when is_integer(timeout),
-        do: do_dispatch(event, :publish, timeout: timeout)
-
-      def publish(event, opts),
-        do: do_dispatch(event, :publish, opts)
-
-      for {request_module, routers} <-
-            Enum.group_by(
-              @registered_requests,
-              fn {request_module, _router_module} -> request_module end,
-              fn {_request_module, router_module} -> router_module end
-            ) do
-        @request_module request_module
-
-        if Enum.count(routers) == 1 do
-          @router Enum.at(routers, 0)
-
-          defp do_dispatch(%@request_module{} = request, :send, opts) do
+          defp do_publish(%@event_module{} = event, opts) do
             opts = Keyword.merge(@default_dispatch_opts, opts)
 
-            @router.send(request, opts)
-          end
-
-          defp do_dispatch(%@request_module{} = request, :publish, opts) do
-            opts = Keyword.merge(@default_dispatch_opts, opts)
-
-            @router.publish(request, opts)
-          end
-        else
-          @routers routers
-
-          defp do_dispatch(%@request_module{} = request, :send, opts) do
-            {:error, :more_than_one_handler_founded}
-          end
-
-          defp do_dispatch(%@request_module{} = request, :publish, opts) do
-            opts = Keyword.merge(@default_dispatch_opts, opts)
-
-            max_concurrency = Keyword.get(@internal_dispatch_opts, :max_concurrency)
-            concurrency_timeout = Keyword.fetch!(@internal_dispatch_opts, :concurrency_timeout)
+            max_concurrency = Keyword.get(@composite_router_opts, :max_concurrency)
+            concurrency_timeout = Keyword.fetch!(@composite_router_opts, :concurrency_timeout)
 
             resp =
-              if max_concurrency == 1 do
-                Enum.map(@routers, fn router ->
-                  router.publish(request, opts)
-                end)
-              else
-                Task.async_stream(
-                  @routers,
-                  fn router ->
-                    router.publish(request, opts)
-                  end,
-                  max_concurrency: max_concurrency,
-                  timeout: concurrency_timeout
-                )
-              end
-
-            resp =
-              resp
+              do_batch_publish(event, opts, @router_modules, max_concurrency, concurrency_timeout)
               |> Enum.filter(fn item -> errors?(item) end)
               |> Enum.map(fn item -> elem(item, 1) end)
               |> Enum.flat_map(fn item -> item end)
@@ -206,20 +194,42 @@ defmodule Ming.CompositeRouter do
             end
           end
         end
+
+        defp do_publish(_event, _opts) do
+          :ok
+        end
+
+        defp do_batch_publish(event, opts, router_modules, 1, _concurrency_timeout) do
+          Enum.map(router_modules, fn router -> router.publish(event, opts) end)
+        end
+
+        defp do_batch_publish(event, opts, router_modules, max_concurrency, concurrency_timeout) do
+          Task.async_stream(
+            router_modules,
+            fn router -> router.publish(event, opts) end,
+            max_concurrency: max_concurrency,
+            timeout: concurrency_timeout
+          )
+        end
       end
 
-      # Catch unregistered commands, log and return an error.
-      defp do_dispatch(request, :send, _opts) do
-        Logger.error(fn ->
-          "attempted to dispatch an unregistered command: " <> inspect(request)
-        end)
-
-        {:error, :unregistered_command}
+    quote generated: true do
+      @doc false
+      def __registered_requests__ do
+        @registered_requests
+        |> Enum.map(fn {request_module, _router} -> request_module end)
+        |> Enum.uniq()
       end
 
-      defp do_dispatch(_request, :publish, _opts) do
-        :ok
-      end
+      @registered_requests_by_module Enum.group_by(
+                                       @registered_requests,
+                                       fn {request_module, _router_module} -> request_module end,
+                                       fn {_request_module, router_module} -> router_module end
+                                     )
+
+      unquote(send_functions)
+
+      unquote(publish_functions)
 
       defp errors?({:error, _resp}), do: true
       defp errors?(_resp), do: false
