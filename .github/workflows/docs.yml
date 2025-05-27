@@ -1,0 +1,31 @@
+name: docs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    name: build & docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          show-progress: false
+
+      - name: setup elixir
+        id: beam
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: 1.18.x
+          otp-version: 27
+
+      - name: install dependencies
+        run: mix do deps.get, deps.compile
+
+      - name: gen docs
+        run: mix docs

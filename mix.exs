@@ -39,7 +39,7 @@ defmodule Ming.MixProject do
       {:telemetry_registry, "~> 0.2 or ~> 0.3"},
 
       # Docs
-      {:ex_doc, "~> 0.20", only: :docs},
+      {:ex_doc, "~> 0.20", only: :dev, runtime: false},
 
       # Analyser
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
