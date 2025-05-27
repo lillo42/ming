@@ -1,0 +1,56 @@
+name: publish
+
+on:
+  push:
+    tags:
+      - '*' 
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: build, test & release
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+
+      matrix:
+        include:
+          - elixir: 1.18.x
+            otp: 27
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: setup elixir
+        id: beam
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+
+      - name: install dependencies
+        run: mix do deps.get, deps.compile
+
+      - name: check formatting
+        run: mix format --check-formatted
+
+      - name: check compilation
+        run: mix compile --warnings-as-errors
+
+      - name: analyse code
+        run: mix credo --strict
+
+      - name: run tests
+        run: mix test
+
+      - name: set up api key
+        run: mix hex.config api_key ${{secrets.HEX_API_KEY}}
+
+      - name: publish
+        run: mix hex.publish
