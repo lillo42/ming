@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  publish:
-    name: build, test & release
+  build:
+    name: build & test
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -49,6 +49,18 @@ jobs:
       - name: run tests
         run: mix test
 
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    needs: [ build ]
+    steps:
+      - name: setup elixir
+        id: beam
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: 1.18.x
+          otp-version: 27
+          
       - name: set up api key
         run: mix hex.config api_key ${{secrets.HEX_API_KEY}}
 
