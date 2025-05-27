@@ -67,8 +67,7 @@ defmodule Ming.MixProject do
       licenses: ["GPL-3.0"],
       links: %{"GitHub" => @source_url},
       files:
-        ~w(.formatter.exs mix.exs README.md CHANGELOG.md lib) ++
-          ~w(integration_test/cases integration_test/support)
+        ~w(.formatter.exs mix.exs README.md CHANGELOG.md lib)
     ]
   end
 
