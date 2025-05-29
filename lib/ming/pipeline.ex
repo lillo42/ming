@@ -29,6 +29,17 @@ defmodule Ming.Pipeline do
     - `response` - sets the response to send back to the caller.
   """
 
+  @type t :: %{
+          application: term() | nil,
+          correlation_id: Ming.UUID.hex() | Ming.UUID.raw(),
+          request: any(),
+          request_uuid: Ming.UUID.hex() | Ming.UUID.raw() | nil,
+          respose: any() | nil,
+          metadata: map(),
+          halted: boolean(),
+          assigned: map()
+        }
+
   defstruct [
     :application,
     :correlation_id,

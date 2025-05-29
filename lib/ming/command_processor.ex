@@ -5,17 +5,21 @@ defmodule Ming.CommandProcessor do
 
   @doc false
   defmacro __using__(opts) do
-    quote bind_quoted: [opts: opts] do
+    app = Keyword.fetch!(opts, :otp_app)
+    task_supervisor = Keyword.get(opts, :task_supervisor, Ming.TaskSupervisor)
+    dispatch_opts = Keyword.get(opts, :dispatch_opts, [])
+
+    quote do
       import unquote(__MODULE__)
 
       @before_compile unquote(__MODULE__)
 
-      use Commanded.Commands.CompositeRouter,
-        application: __MODULE__,
-        default_dispatch_opts: Keyword.get(opts, :default_dispatch_opts, [])
+      use Ming.CompositeRouter,
+        otp_app: unquote(app),
+        default_dispatch_opts: unquote(dispatch_opts)
 
-      @otp_app Keyword.fetch!(opts, :otp_app)
-      @default_task_supervisor Keyword.get(opts, :task_supervisor)
+      @otp_app unquote(app)
+      @task_supervisor unquote(task_supervisor)
     end
   end
 
@@ -31,10 +35,8 @@ defmodule Ming.CommandProcessor do
       def publish_async(event, opts), do: do_publish_async(event, opts)
 
       defp do_publish_async(event, opts) do
-        supervisor_module = @default_task_supervisor || Ming.TaskSupervisor
-
         Task.Supervisor.async_nolink(
-          supervisor_module,
+          @task_supervisor,
           __MODULE__,
           :publish,
           [event, opts],
