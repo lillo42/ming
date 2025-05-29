@@ -2,7 +2,7 @@ defmodule Ming.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/lillo42/ming"
-  @version "0.1.0"
+  @version "0.1.1"
 
   def project do
     [
