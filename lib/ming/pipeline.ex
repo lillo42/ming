@@ -1,9 +1,9 @@
 defmodule Ming.Pipeline do
   @type t :: %{
           application: term() | nil,
-          correlation_id: Ming.UUID.hex() | Ming.UUID.raw(),
+          correlation_id: UUIDV7.t(),
           request: any(),
-          request_uuid: Ming.UUID.hex() | Ming.UUID.raw() | nil,
+          request_uuid: UUIDV7.t() | nil,
           respose: any() | nil,
           metadata: map(),
           halted: boolean(),

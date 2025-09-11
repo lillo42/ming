@@ -2,7 +2,6 @@ defmodule Ming.SendRouter do
   require Logger
   alias Ming.Dispatcher.Payload
   alias Ming.Telemetry
-  alias Ming.UUID
 
   defmacro __using__(opts) do
     otp_app = Keyword.get(opts, :otp_app, :ming)
@@ -111,8 +110,8 @@ defmodule Ming.SendRouter do
             opts = Keyword.merge(ming_opts, opts)
 
             application = Keyword.fetch!(opts, :application)
-            request_uuid = Keyword.get_lazy(opts, :request_uuid, &UUID.uuid4/0)
-            correlation_id = Keyword.get_lazy(opts, :correlation_id, &UUID.uuid4/0)
+            request_uuid = Keyword.get_lazy(opts, :request_uuid, &UUIDV7.generate/0)
+            correlation_id = Keyword.get_lazy(opts, :correlation_id, &UUIDV7.generate/0)
             metadata = Keyword.fetch!(opts, :metadata) |> validate_send_metadata()
             retry_attempts = Keyword.get(opts, :retry_attempts)
             timeout = Keyword.fetch!(opts, :timeout)

@@ -1,3 +1,5 @@
 defmodule Ming do
-  @moduledoc false
+  @moduledoc """
+  Use `Ming` to build your own Elixir applications following the CQRS pattern.
+  """
 end
