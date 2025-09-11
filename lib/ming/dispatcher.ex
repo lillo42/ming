@@ -30,9 +30,8 @@ defmodule Ming.Dispatcher do
     ]
   end
 
-  # Dispatch the given command to the handler module for the aggregate as
-  # identified.
-  # @spec dispatch(payload :: Payload.t()) :: Router.dispatch_resp() | {:ok, events :: list(struct())}
+  @spec dispatch(payload :: Payload.t()) :: :ok | {:ok, any()} | {:error, any()}
+
   def dispatch(%Payload{} = payload) do
     pipeline = to_pipeline(payload)
     telemetry_metadata = telemetry_metadata(pipeline, payload)
