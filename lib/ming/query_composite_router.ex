@@ -1,4 +1,63 @@
 defmodule Ming.QueryCompositeRouter do
+  @moduledoc """
+  Provides a composite routing system that aggregates multiple QueryRouters in the Ming framework.
+
+  This module allows you to combine multiple `Ming.QueryRouter` modules into a single composite
+
+  router, providing a unified interface for query execution across different domains or
+  bounded contexts within your application.
+
+  ## Key Features
+  - Aggregates multiple QueryRouter modules into a single query interface
+  - Provides unified query execution across different application domains
+  - Handles query routing conflicts between different routers
+  - Maintains the same API as individual QueryRouter modules
+  - Simplified configuration with default options inheritance
+
+  ## Usage
+  Use this module to create a composite query router that combines multiple domain-specific query routers:
+
+      defmodule MyApp.CompositeQueryRouter do
+        use Ming.QueryCompositeRouter, 
+
+          otp_app: :my_app,
+          default_query_opts: [timeout: 10_000, metadata: %{source: "composite"}]
+
+        # Include query routers from different bounded contexts
+
+        query_router MyApp.Accounting.QueryRouter
+        query_router MyApp.Inventory.QueryRouter  
+        query_router MyApp.Customer.QueryRouter
+        query_router MyApp.Reporting.QueryRouter
+      end
+
+  Then you can execute queries through the composite interface:
+
+      MyApp.CompositeQueryRouter.query(%GetUserById{id: 123})
+      MyApp.CompositeQueryRouter.query(%GetProductInventory{product_id: "456"})
+
+  ## Design Philosophy
+
+  The QueryCompositeRouter follows the same pattern as other composite routers in Ming,
+  providing a unified facade for multiple query routers while maintaining the simplicity
+  of the individual query router API.
+  """
+
+  @doc """
+  Sets up the QueryCompositeRouter module with configuration options.
+
+  This macro is invoked when using `Ming.QueryCompositeRouter` in another module.
+  It registers module attributes and sets default configuration values for composite query routing.
+
+  ## Options
+  - `:otp_app` - The OTP application name (default: `:ming`)
+  - `:default_query_opts` - Default options applied to all query operations
+
+  ## Examples
+      use Ming.QueryCompositeRouter,
+        otp_app: :my_app,
+        default_query_opts: [timeout: 15_000, metadata: %{environment: "production"}]
+  """
   defmacro __using__(opts) do
     otp_app = Keyword.get(opts, :otp_app, :ming)
 
@@ -20,6 +79,24 @@ defmodule Ming.QueryCompositeRouter do
     end
   end
 
+  @doc """
+  Includes a QueryRouter module in the composite router.
+
+  This macro registers all queries from the specified QueryRouter module,
+
+  making them available through the composite router interface.
+
+  ## Parameters
+  - `router_module` - The `Ming.QueryRouter` module to include in the composite
+
+  ## Examples
+      query_router MyApp.Accounting.QueryRouter
+      query_router MyApp.Inventory.QueryRouter
+
+  ## Note
+  The included router module must implement the `__registered_query_requests__/0`
+  function which returns a list of registered query modules.
+  """
   defmacro query_router(router_module) do
     quote do
       for command_module <- unquote(router_module).__registered_query_requests__() do
@@ -28,13 +105,26 @@ defmodule Ming.QueryCompositeRouter do
     end
   end
 
+  @doc """
+  Callback for executing queries through the composite router.
+
+  This callback provides a consistent interface for query execution that
+  matches individual QueryRouter modules.
+  """
   @callback query(query :: struct()) :: Ming.QueryRouter.query_resp()
 
+  @doc """
+  Callback for executing queries with options or timeout through the composite router.
+
+  This callback provides a consistent interface for query execution with additional
+  configuration options that matches individual QueryRouter modules.
+  """
   @callback query(
               query :: struct(),
               timeout_or_opts :: non_neg_integer() | :infinity | Keyword.t()
             ) :: Ming.QueryRouter.query_resp()
 
+  @doc false
   defmacro __before_compile__(_env) do
     quote generated: true do
       @doc false
