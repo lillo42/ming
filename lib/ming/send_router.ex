@@ -1,8 +1,62 @@
 defmodule Ming.SendRouter do
+  @moduledoc """
+  Provides a macro-based routing system for sending commands in the Ming framework.
+
+  This module allows you to define command routing configurations using macros that
+
+  generate the necessary dispatching code at compile time. It handles command registration,
+  middleware configuration, and provides a clean API for sending commands to their
+  appropriate handlers.
+
+  ## Key Features
+
+  - Command registration via `send_dispatch/2` macro
+  - Middleware configuration via `send_middleware/1` macro  
+  - Automatic command validation and routing
+  - Telemetry integration for monitoring
+  - Configurable timeouts and retry mechanisms
+
+
+  ## Usage
+
+  Use this module in your command routing modules to set up command handling:
+
+      defmodule MyApp.SendRouter do
+
+        use Ming.SendRouter, otp_app: :my_app
+
+        send_middleware MyApp.AuthMiddleware
+        send_middleware MyApp.LoggingMiddleware
+
+        send_dispatch CreateUser, to: UserHandler
+        send_dispatch UpdateUser, to: UserHandler, timeout: 10_000
+      end
+
+  Then you can send commands using the generated `send/1` and `send/2` functions:
+
+      MyApp.SendRouter.send(%CreateUser{name: "John", email: "john@example.com"})
+  """
   require Logger
   alias Ming.Dispatcher.Payload
   alias Ming.Telemetry
 
+  @doc """
+  Sets up the SendRouter module with configuration options.
+
+  This macro is invoked when using `Ming.SendRouter` in another module.
+  It registers module attributes and sets default configuration values.
+
+
+  ## Options
+
+  - `:otp_app` - The OTP application name (default: `:ming`)
+  - `:timeout` - Default timeout for command execution in milliseconds (default: `5000`)
+  - `:retry` - Default number of retry attempts for failed commands (default: `10`)
+
+  ## Examples
+
+      use Ming.SendRouter, otp_app: :my_app, timeout: 10_000, retry: 5
+  """
   defmacro __using__(opts) do
     otp_app = Keyword.get(opts, :otp_app, :ming)
     timeout = Keyword.get(opts, :timeout, 5_000)
@@ -29,12 +83,62 @@ defmodule Ming.SendRouter do
     end
   end
 
+  @doc """
+  Sets up the SendRouter module with configuration options.
+
+  This macro is invoked when using `Ming.SendRouter` in another module.
+  It registers module attributes and sets default configuration values.
+
+
+  ## Options
+
+  - `:otp_app` - The OTP application name (default: `:ming`)
+  - `:timeout` - Default timeout for command execution in milliseconds (default: `5000`)
+  - `:retry` - Default number of retry attempts for failed commands (default: `10`)
+
+  ## Examples
+      use Ming.SendRouter, otp_app: :my_app, timeout: 10_000, retry: 5
+  """
   defmacro send_middleware(middleware_module) do
     quote do
       @registered_send_middleware unquote(middleware_module)
     end
   end
 
+  @doc """
+  Registers a command or commands for dispatch to specific handlers.
+
+  This macro generates the necessary functions to route commands to their
+  appropriate handlers with the specified configuration options.
+
+  ## Parameters
+  - `request_module_or_modules` - A single command module or list of command modules
+  - `opts` - Configuration options for command dispatch
+
+  ## Options
+  - `:to` - The handler module that will process the command (required)
+  - `:function` - The handler function to call (default: `:execute`)
+  - `:before_execute` - Optional function to prepare the command before execution
+  - `:timeout` - Timeout for this specific command (overrides default)
+  - `:metadata` - Additional metadata for the execution context
+  - `:retry_attempts` - Number of retry attempts for this command
+  - `:returning` - Specifies what should be returned from execution
+
+  ## Examples
+
+      # Single command
+      send_dispatch CreateUser, to: UserHandler
+
+      # Multiple commands
+      send_dispatch [CreateUser, UpdateUser], to: UserHandler
+
+      # With custom options
+      send_dispatch CreateUser,
+        to: UserHandler,
+        function: :handle_create,
+        timeout: 10_000,
+        metadata: %{source: "api"}
+  """
   defmacro send_dispatch(request_module_or_modules, opts) do
     opts = parse_send_opts(opts, [])
 
@@ -48,6 +152,16 @@ defmodule Ming.SendRouter do
     end
   end
 
+  @typedoc """
+  Response type for send operations.
+
+  Can be one of:
+  - `:ok` - Command executed successfully (when returning: false)
+  - `{:ok, any()}` - Command executed successfully with result
+  - `{:error, :unregistered_command}` - Command was not registered
+  - `{:error, :more_than_one_handler_found}` - Multiple handlers found for command
+  - `{:error, any()}` - Command execution failed with specific error
+  """
   @type send_resp ::
           :ok
           | {:ok, any()}
@@ -55,13 +169,27 @@ defmodule Ming.SendRouter do
           | {:error, :more_than_one_handler_found}
           | {:error, any()}
 
+  @doc """
+  Callback for sending commands.
+
+  This callback is implemented by modules that use `Ming.SendRouter` and
+  provides a consistent interface for command dispatch.
+  """
   @callback send(command :: struct()) :: send_resp()
 
+  @doc """
+  Callback for sending commands with options or timeout.
+
+  This callback is implemented by modules that use `Ming.SendRouter` and
+  provides a consistent interface for command dispatch with additional
+  configuration options.
+  """
   @callback send(
               command :: struct(),
               timeout_or_opts :: non_neg_integer() | :infinity | Keyword.t()
             ) :: send_resp()
 
+  @doc false
   defmacro __before_compile__(_env) do
     quote generated: true do
       @doc false

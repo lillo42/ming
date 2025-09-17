@@ -1,6 +1,74 @@
 defmodule Ming.PublishRouter do
+  @moduledoc """
+  Provides a routing system for publishing and handling events in the Ming framework.
+
+  This module enables event-driven architecture by allowing events to be published
+  to multiple handlers concurrently. It supports both synchronous and asynchronous
+
+  event publishing with configurable concurrency, timeouts, and retry mechanisms.
+
+  ## Key Features
+
+  - Event registration and routing to multiple handlers
+  - Synchronous and asynchronous event publishing
+
+  - Configurable concurrency control for parallel event processing
+  - Middleware support for cross-cutting concerns
+  - Telemetry integration for monitoring event processing
+  - Error aggregation for handling multiple handler failures
+
+  ## Usage
+
+  Use this module to create event routers that handle event publication:
+
+      defmodule MyApp.PublishRouter do
+        use Ming.PublishRouter, 
+          otp_app: :my_app,
+          timeout: 10_000,
+
+          max_concurrency: 5
+
+        publish_middleware MyApp.EventValidationMiddleware
+        publish_middleware MyApp.EventLoggingMiddleware
+
+        publish_dispatch UserCreated, to: UserProjection
+        publish_dispatch UserCreated, to: EmailNotifier
+        publish_dispatch OrderPlaced, to: OrderProcessor, timeout: 30_000
+      end
+
+  Then you can publish events:
+
+      # Synchronous publishing
+      MyApp.PublishRouter.publish(%UserCreated{id: 123, name: "John"})
+
+      # Asynchronous publishing  
+      task = MyApp.PublishRouter.publish_async(%OrderPlaced{order_id: "456", amount: 100.0})
+      Task.await(task)
+  """
+
   alias Ming.Dispatcher.Payload
 
+  @doc """
+  Sets up the PublishRouter module with configuration options.
+
+  This macro is invoked when using `Ming.PublishRouter` in another module.
+  It registers module attributes and sets default configuration values for event publishing.
+
+  ## Options
+  - `:otp_app` - The OTP application name (default: `:ming`)
+  - `:timeout` - Default timeout for event processing in milliseconds (default: `5000`)
+  - `:retry` - Default number of retry attempts for failed event processing (default: `10`)
+  - `:concurrency_timeout` - Timeout for concurrent event processing (default: `30000`)
+  - `:max_concurrency` - Maximum number of concurrent event handlers (default: `1`)
+  - `:task_supervisor` - Task supervisor for async operations (default: `Ming.TaskSupervisor`)
+
+  ## Examples
+      use Ming.PublishRouter,
+        otp_app: :my_app,
+        timeout: 15_000,
+        max_concurrency: 10,
+        concurrency_timeout: 60_000
+  """
   defmacro __using__(opts) do
     otp_app = Keyword.get(opts, :otp_app, :ming)
     timeout = Keyword.get(opts, :timeout, 5_000)
@@ -34,12 +102,62 @@ defmodule Ming.PublishRouter do
     end
   end
 
+  @doc """
+  Registers middleware for event processing.
+
+  Middleware modules are executed in the order they are registered and can
+  intercept and transform events before they reach their handlers.
+
+  ## Parameters
+  - `middleware_module` - The middleware module to register
+
+  ## Examples
+
+      publish_middleware MyApp.EventValidationMiddleware
+      publish_middleware MyApp.EventEnrichmentMiddleware
+  """
   defmacro publish_middleware(middleware_module) do
     quote do
       @registered_publish_middleware unquote(middleware_module)
     end
   end
 
+  @doc """
+  Registers an event or events for dispatch to specific handlers.
+
+  This macro generates the necessary functions to route events to their
+  appropriate handlers with the specified configuration options.
+
+  ## Parameters
+  - `request_module_or_modules` - A single event module or list of event modules
+  - `opts` - Configuration options for event dispatch
+
+  ## Options
+  - `:to` - The handler module that will process the event (required)
+  - `:function` - The handler function to call (default: `:execute`)
+  - `:before_execute` - Optional function to prepare the event before execution
+  - `:timeout` - Timeout for this specific event (overrides default)
+  - `:metadata` - Additional metadata for the execution context
+  - `:retry_attempts` - Number of retry attempts for this event
+  - `:returning` - Specifies what should be returned from execution
+
+  ## Examples
+      # Single event to single handler
+      publish_dispatch UserCreated, to: UserProjection
+
+      # Single event to multiple handlers
+      publish_dispatch UserCreated, to: UserProjection
+      publish_dispatch UserCreated, to: EmailNotifier
+
+      # Multiple events to same handler
+      publish_dispatch [OrderCreated, OrderUpdated, OrderDeleted], to: OrderProjection
+
+      # With custom options
+      publish_dispatch PaymentProcessed,
+        to: AccountingService,
+        function: :handle_payment,
+        timeout: 30_000
+  """
   defmacro publish_dispatch(request_module_or_modules, opts) do
     opts = parse_publish_opts(opts, [])
 
@@ -53,22 +171,51 @@ defmodule Ming.PublishRouter do
     end
   end
 
+  @typedoc """
+  Response type for publish operations.
+
+  Can be one of:
+  - `:ok` - All event handlers processed successfully
+  - `{:error, errors}` - One or more handlers failed, with list of errors
+  """
   @type publish_resp :: :ok | {:error, any()}
 
+  @doc """
+  Callback for publishing events synchronously.
+
+  This callback provides a consistent interface for synchronous event publishing.
+  """
   @callback publish(event :: struct()) :: publish_resp()
 
+  @doc """
+  Callback for publishing events synchronously with options or timeout.
+
+  This callback provides a consistent interface for synchronous event publishing
+  with additional configuration options.
+  """
   @callback publish(
               command :: struct(),
               timeout_or_opts :: non_neg_integer() | :infinity | Keyword.t()
             ) :: publish_resp()
 
+  @doc """
+  Callback for publishing events asynchronously.
+
+  This callback returns a Task that can be awaited for the result.
+  """
   @callback publish_async(event :: struct()) :: Task.t()
 
+  @doc """
+  Callback for publishing events asynchronously with options or timeout.
+
+  This callback returns a Task that can be awaited for the result.
+  """
   @callback publish_async(
               event :: struct(),
               timeout_or_opts :: non_neg_integer() | :infinity | Keyword.t()
             ) :: Task.t()
 
+  @doc false
   defmacro __before_compile__(_env) do
     quote generated: true do
       @doc false
@@ -179,8 +326,8 @@ defmodule Ming.PublishRouter do
         opts = Keyword.merge(ming_opts, opts)
 
         application = Keyword.fetch!(opts, :application)
-        request_uuid = Keyword.get_lazy(opts, :request_uuid, &UUIDV7.generate/0)
-        correlation_id = Keyword.get_lazy(opts, :correlation_id, &UUIDV7.generate/0)
+        request_uuid = Keyword.get_lazy(opts, :request_uuid, &UUIDv7.generate/0)
+        correlation_id = Keyword.get_lazy(opts, :correlation_id, &UUIDv7.generate/0)
         metadata = Keyword.fetch!(opts, :metadata) |> validate_publish_metadata()
         retry_attempts = Keyword.get(opts, :retry_attempts)
         timeout = Keyword.fetch!(opts, :timeout)

@@ -1,5 +1,27 @@
 defmodule Ming.Dispatcher do
-  @moduledoc false
+  @moduledoc """
+  The core dispatching module for the Ming CQRS framework.
+
+  This module is responsible for processing command payloads through the Ming pipeline,
+
+  executing handlers, managing middleware, and handling retries and errors. It serves as
+  the central coordinator for command execution in the Ming framework.
+
+  The dispatcher follows a structured pipeline pattern:
+  1. Convert payload to pipeline
+  2. Execute before_dispatch middleware
+  3. Execute command handler (with retry logic if needed)
+  4. Execute after_dispatch middleware on success
+  5. Execute after_failure middleware on errors
+  6. Return formatted response
+
+
+  ## Usage
+
+  The dispatcher is typically called by the command processor to handle command execution.
+  It manages the complete lifecycle of command processing including telemetry, error handling,
+  and middleware execution.
+  """
 
   alias Ming.Dispatcher.Payload
   alias Ming.ExecutionContext
@@ -10,7 +32,27 @@ defmodule Ming.Dispatcher do
   require Logger
 
   defmodule Payload do
-    @moduledoc false
+    @moduledoc """
+    Defines the payload structure for command dispatching.
+
+    This struct contains all the necessary information to execute a command through
+    the Ming framework, including handler configuration, middleware, and execution context.
+
+    ## Fields
+
+    - `:application` - The Ming application module
+    - `:request` - The command request to be executed
+    - `:request_uuid` - Unique identifier for the request
+    - `:correlation_id` - Correlation ID for distributed tracing
+    - `:handler_module` - Module that handles the command execution
+    - `:handler_function` - Function name to call on the handler module (defaults to `:execute`)
+    - `:handler_before_execute` - Optional function to prepare the command before execution
+    - `:timeout` - Execution timeout in milliseconds
+    - `:metadata` - Additional metadata for the execution context
+    - `:retry_attempts` - Number of retry attempts remaining
+    - `:returning` - Specifies what should be returned from execution (:events, :execution_result, or false)
+    - `:middleware` - List of middleware modules to execute during processing
+    """
 
     @type t :: %__MODULE__{}
 
@@ -30,8 +72,40 @@ defmodule Ming.Dispatcher do
     ]
   end
 
-  @spec dispatch(payload :: Payload.t()) :: :ok | {:ok, any()} | {:error, any()}
+  @doc """
+  Dispatches a command payload through the Ming execution pipeline.
 
+  This is the main entry point for command execution. It handles the complete
+  processing lifecycle including middleware execution, handler invocation,
+  error handling, and telemetry.
+
+  ## Parameters
+  - `payload`: A `Ming.Dispatcher.Payload.t()` containing command execution details
+
+  ## Returns
+  - `:ok` - Command executed successfully (when returning: false)
+  - `{:ok, events}` - Command executed successfully with generated events (when returning: :events)
+  - `{:ok, execution_result}` - Command executed successfully with execution result (when returning: :execution_result)
+  - `{:error, reason}` - Command execution failed
+
+  ## Examples
+      payload = %Ming.Dispatcher.Payload{
+        application: MyApp,
+        request: %OpenAccount{account_number: "ACC123", initial_balance: 1000},
+        handler_module: BankAccountHandler,
+        timeout: 5000
+      }
+
+      case Ming.Dispatcher.dispatch(payload) do
+        {:ok, events} -> 
+          # Handle successful execution with events
+        {:error, reason} -> 
+
+          # Handle execution failure
+
+      end
+  """
+  @spec dispatch(payload :: Payload.t()) :: :ok | {:ok, any()} | {:error, any()}
   def dispatch(%Payload{} = payload) do
     pipeline = to_pipeline(payload)
     telemetry_metadata = telemetry_metadata(pipeline, payload)
@@ -56,10 +130,12 @@ defmodule Ming.Dispatcher do
     end
   end
 
+  @doc false
   defp to_pipeline(%Payload{} = payload) do
     struct(Pipeline, Map.from_struct(payload))
   end
 
+  @doc false
   defp execute(%Pipeline{} = pipeline, %Payload{} = payload, %ExecutionContext{} = context) do
     %Pipeline{application: application} = pipeline
     %Payload{timeout: timeout} = payload
@@ -90,6 +166,7 @@ defmodule Ming.Dispatcher do
     end
   end
 
+  @doc false
   defp to_execution_context(%Pipeline{} = pipeline, %Payload{} = payload) do
     %Pipeline{request: request, request_uuid: resquest_uuid, metadata: metadata} = pipeline
 
@@ -115,14 +192,17 @@ defmodule Ming.Dispatcher do
     }
   end
 
+  @doc false
   defp before_dispatch(%Pipeline{} = pipeline, %Payload{middleware: middleware}) do
     Pipeline.chain(pipeline, :before_dispatch, middleware)
   end
 
+  @doc false
   defp after_dispatch(%Pipeline{} = pipeline, %Payload{middleware: middleware}) do
     Pipeline.chain(pipeline, :after_dispatch, middleware)
   end
 
+  @doc false
   defp after_failure(%Pipeline{response: {:error, error}} = pipeline, %Payload{} = payload) do
     %Payload{middleware: middleware} = payload
 
@@ -131,6 +211,7 @@ defmodule Ming.Dispatcher do
     |> Pipeline.chain(:after_failure, middleware)
   end
 
+  @doc false
   defp after_failure(
          %Pipeline{response: {:error, error, reason}} = pipeline,
          %Payload{} = payload
@@ -143,16 +224,19 @@ defmodule Ming.Dispatcher do
     |> Pipeline.chain(:after_failure, middleware)
   end
 
+  @doc false
   defp after_failure(%Pipeline{} = pipeline, %Payload{} = payload) do
     %Payload{middleware: middleware} = payload
 
     Pipeline.chain(pipeline, :after_failure, middleware)
   end
 
+  @doc false
   defp telemetry_start(telemetry_metadata) do
     Telemetry.start([:commanded, :application, :dispatch], telemetry_metadata)
   end
 
+  @doc false
   defp telemetry_stop(%Pipeline{assigns: assigns} = pipeline, start_time, telemetry_metadata) do
     event_prefix = [:commanded, :application, :dispatch]
 
@@ -167,6 +251,7 @@ defmodule Ming.Dispatcher do
     pipeline
   end
 
+  @doc false
   defp telemetry_metadata(%Pipeline{} = pipeline, %Payload{} = payload) do
     %Payload{application: application} = payload
 
@@ -179,6 +264,7 @@ defmodule Ming.Dispatcher do
     }
   end
 
+  @doc false
   defp maybe_retry(pipeline, payload, context) do
     case ExecutionContext.retry(context) do
       {:ok, context} ->
@@ -191,6 +277,7 @@ defmodule Ming.Dispatcher do
     end
   end
 
+  @doc false
   defp format_reply(events, %Ming.ExecutionContext{} = context) do
     Ming.ExecutionContext.format_reply({:ok, events}, context)
   end
