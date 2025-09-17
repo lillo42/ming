@@ -1,32 +1,29 @@
 defmodule Ming.ExecutionContext do
   @moduledoc """
-  Defines the arguments used to execute a command for an aggregate.
+  Defines the execution context structure and operations for command processing in the Ming framework.
 
-  The available options are:
+  The `ExecutionContext` encapsulates all the necessary information for executing a command,
+  including the command itself, correlation data, retry configuration, and metadata. This structure
+  is passed through the command handling pipeline and can be modified by middleware components.
 
-    - `request` - the command to execute, typically a struct
-      (e.g. `%OpenBankAccount{...}`).
+  ## Context Fields
 
-    - `retry_attempts` - the number of retries permitted if an
-      `{:error, :wrong_expected_version}` is encountered when appending events.
+  - `:request` - The command to be executed (typically a struct)
+  - `:causation_id` - A UUID identifying the command that caused this execution :cite[1]
+  - `:correlation_id` - A UUID used to correlate related commands and events :cite[1]
+  - `:handler` - The module responsible for handling the command
+  - `:function` - The function name (as atom) that handles the command (defaults to `:execute`)
+  - `:before_execute` - Optional function to prepare the command before execution :cite[1]
+  - `:retry_attempts` - Number of retry attempts remaining for handling failures
+  - `:returning` - Specifies what should be returned from successful execution
+  - `:metadata` - Key/value pairs of metadata associated with the execution
 
-    - `correlation_id` - a UUID used to correlate related commands/events.
+  ## Usage
 
-    - `metadata` - a map of key/value pairs containing the metadata to be
-      associated with all events created by the command.
 
-    - `handler` - the module that handles the command. It may be either the
-      aggregate module itself or a separate command handler module.
-
-    - `function` - the name of the function, as an atom, that handles the command.
-      The default value is `:execute`, used to support command dispatch directly
-      to the aggregate module. For command handlers the `:handle` function is
-      used.
-
-    - `before_execute` - the name of the function, as an atom, that prepares the
-      command before execution, called just before `function`. The default value
-      is `nil`, disabling it. It should return `:ok` on success or `{:error, any()}`
-      to cancel the dispatch.
+  The execution context flows through the command processing pipeline, allowing middleware
+  to intercept and transform the context at various stages. It supports retry mechanisms
+  and flexible response formatting based on the configured return options.
   """
 
   defstruct [
@@ -41,6 +38,30 @@ defmodule Ming.ExecutionContext do
     metadata: %{}
   ]
 
+  @doc """
+  Attempts to retry the execution by decrementing the retry attempts counter.
+
+  This function is used when command execution fails and retry logic should be applied.
+  It returns an updated context with decremented retry attempts or an error if no
+  retries remain.
+
+  ## Parameters
+  - `context`: The current `Ming.ExecutionContext.t()`
+
+  ## Returns
+  - `{:ok, updated_context}` if retries are available
+  - `{:error, :too_many_attempts}` if no retries remain
+
+
+  ## Examples
+      case Ming.ExecutionContext.retry(context) do
+        {:ok, updated_context} -> 
+          # Retry with updated context
+        {:error, :too_many_attempts} -> 
+          # Handle retry exhaustion
+
+      end
+  """
   def retry(%__MODULE__{retry_attempts: nil}),
     do: {:error, :too_many_attempts}
 
@@ -55,6 +76,38 @@ defmodule Ming.ExecutionContext do
     {:ok, context}
   end
 
+  @doc """
+  Formats the reply from command execution based on the context's return configuration.
+
+  This function transforms the raw execution result into the appropriate response format
+  based on the `:returning` option configured in the execution context.
+
+  ## Parameters
+  - `reply`: The raw execution result tuple (`{:ok, events}` or `{:error, error}`)
+  - `context`: The current `Ming.ExecutionContext.t()` with return configuration
+
+  ## Returns
+  - Formatted response based on the context's `:returning` setting:
+
+    - `:events` -> `{:ok, list_of_events}`
+    - `:execution_result` -> `{:ok, %Ming.ExecutionResult{}}`
+
+    - `false` or `nil` -> `:ok`
+
+  ## Examples
+      # With returning: :events
+      format_reply({:ok, [event1, event2]}, context) 
+      # => {:ok, [event1, event2]}
+
+      # With returning: :execution_result  
+      format_reply({:ok, [event1, event2]}, context)
+      # => {:ok, %Ming.ExecutionResult{events: [event1, event2], metadata: %{}}}
+
+
+      # With returning: false
+      format_reply({:ok, [event1, event2]}, context)
+      # => :ok
+  """
   def format_reply({:ok, events}, %__MODULE__{} = context) do
     %__MODULE__{metadata: metadata, returning: returning} = context
 

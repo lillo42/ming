@@ -34,6 +34,9 @@ defmodule Ming.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      # UUID V7
+      {:uuid_v7, "~> 0.6.0"},
+
       # Telemetry
       {:telemetry, "~> 0.4 or ~> 1.0"},
       {:telemetry_registry, "~> 0.2 or ~> 0.3"},

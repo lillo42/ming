@@ -31,7 +31,7 @@ defmodule Ming.RouteTest do
 
     test "an event" do
       resp = Ming.ReturningOkWithDelayRouter.send(%Ming.ExampleEvent1{})
-      assert resp == {:error, :more_than_one_handler_founded}
+      assert resp == {:error, :more_than_one_handler_found}
     end
 
     test "a not register command" do
