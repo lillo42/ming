@@ -168,8 +168,8 @@ defmodule Ming.Router do
   """
   defmacro dispatch(request_module_or_modules, opts) do
     quote do
-      send(unquote(request_module_or_modules), unquote(opts))
-      publish(unquote(request_module_or_modules), unquote(opts))
+      Ming.SendRouter.send(unquote(request_module_or_modules), unquote(opts))
+      Ming.PublishRouter.publish(unquote(request_module_or_modules), unquote(opts))
     end
   end
 

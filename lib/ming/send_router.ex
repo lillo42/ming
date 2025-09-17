@@ -238,8 +238,8 @@ defmodule Ming.SendRouter do
             opts = Keyword.merge(ming_opts, opts)
 
             application = Keyword.fetch!(opts, :application)
-            request_uuid = Keyword.get_lazy(opts, :request_uuid, &UUIDV7.generate/0)
-            correlation_id = Keyword.get_lazy(opts, :correlation_id, &UUIDV7.generate/0)
+            request_uuid = Keyword.get_lazy(opts, :request_uuid, &UUIDv7.generate/0)
+            correlation_id = Keyword.get_lazy(opts, :correlation_id, &UUIDv7.generate/0)
             metadata = Keyword.fetch!(opts, :metadata) |> validate_send_metadata()
             retry_attempts = Keyword.get(opts, :retry_attempts)
             timeout = Keyword.fetch!(opts, :timeout)
