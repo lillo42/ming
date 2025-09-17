@@ -1,16 +1,16 @@
 defmodule Ming.CompositeRouter do
   @moduledoc """
-  Provides a comprehensive composite routing system that aggregates both Send and Publish composite routers.
+  Provides a comprehensive composite routing system that aggregates both Send, Publish and Query composite routers.
 
   This module serves as the highest-level routing abstraction in the Ming framework, combining
-  both `Ming.SendCompositeRouter` and `Ming.PublishCompositeRouter` functionality into a single
+  both `Ming.SendCompositeRouter`, `Ming.PublishCompositeRouter` and `Ming.QueryCompositeRouter` functionality into a single
   unified interface. It allows you to create a master router that aggregates multiple sub-routers
-  of both types (command and event routers).
+  of both types (command, event and query routers).
 
   ## Key Features
-  - Unified aggregation of both command and event composite routers
-  - Shared configuration with override capabilities for send vs publish operations
-  - Simplified inclusion of both command and event routers with a single macro
+  - Unified aggregation of both command, event and query composite routers
+  - Shared configuration with override capabilities for send vs publish vs query operations
+  - Simplified inclusion of both command, event and query routers with a single macro
   - Configurable concurrency settings for event processing
   - Centralized management of all routing in a large application
 
@@ -96,6 +96,15 @@ defmodule Ming.CompositeRouter do
           publish_opts
       end
 
+    default_query_opts =
+      case Keyword.get(opts, :default_query_opts, []) do
+        [] ->
+          default_dispatch_opts
+
+        query_opts ->
+          query_opts
+      end
+
     quote do
       import unquote(__MODULE__)
 
@@ -111,15 +120,19 @@ defmodule Ming.CompositeRouter do
         max_concurrency: unquote(max_concurrency),
         concurrency_timeout: unquote(concurrency_timeout),
         task_supervisor: unquote(task_supervisor)
+
+      use Ming.QueryCompositeRouter,
+        otp_app: unquote(otp_app),
+        default_query_opts: unquote(default_query_opts)
     end
   end
 
   @doc """
-  Includes a router module in both the Send and Publish composite routers.
+  Includes a router module in both the Send, Publish and Query composite routers.
 
-  This macro registers the specified router module with both the SendCompositeRouter
-  and PublishCompositeRouter, making all its commands and events available through
-  the master composite interface.
+  This macro registers the specified router module with both the SendCompositeRouter,
+  PublishCompositeRouter and QueryCompositeRouter, making all its commands and events 
+  available through the master composite interface.
 
   ## Parameters
   - `router_module` - The router module to include in both composites
@@ -137,6 +150,7 @@ defmodule Ming.CompositeRouter do
     quote do
       send_router(unquote(router_module))
       publish_router(unquote(router_module))
+      query_router(unquote(router_module))
     end
   end
 

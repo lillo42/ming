@@ -2,13 +2,13 @@ defmodule Ming.Router do
   @moduledoc """
   Provides a unified routing interface that combines both command sending and event publishing capabilities.
 
-  This module serves as a convenience wrapper that combines `Ming.SendRouter` and `Ming.PublishRouter`
+  This module serves as a convenience wrapper that combines `Ming.SendRouter`, `Ming.PublishRouter` and `Ming.QueryRouter`
   functionality into a single module. It allows you to define both command and event routing in one place,
   with shared configuration and middleware.
 
   ## Key Features
-  - Unified interface for both command sending and event publishing
-  - Shared middleware configuration for both command and event pipelines
+  - Unified interface for both command sending, event publishing and executing query
+  - Shared middleware configuration for both command, event and query pipelines
   - Combined command and event registration
   - Consistent configuration across both routing types
   - Aggregate request registration for both commands and events
@@ -50,6 +50,7 @@ defmodule Ming.Router do
       # Publish an event
       MyApp.Router.publish(%OrderCreated{order_id: "123", amount: 100.0})
   """
+  require Ming.QueryRouter
 
   @doc """
   Sets up the combined Router module with configuration options.
@@ -98,6 +99,11 @@ defmodule Ming.Router do
         concurrency_timeout: unquote(concurrency_timeout),
         max_concurrency: unquote(max_concurrency),
         task_supervisor: unquote(task_supervisor)
+
+      use Ming.QueryRouter,
+        otp_app: unquote(app),
+        timeout: unquote(timeout),
+        retry_attempts: unquote(retry_attempts)
     end
   end
 
@@ -124,11 +130,12 @@ defmodule Ming.Router do
     quote do
       send_middleware(unquote(middleware_module))
       publish_middleware(unquote(middleware_module))
+      query_middleware(unquote(middleware_module))
     end
   end
 
   @doc """
-  Registers a request for both command sending and event publishing.
+  Registers a request for both command sending, event publishing and query execution.
 
   This macro registers the specified request module with both the SendRouter and PublishRouter,
   allowing it to be used for both command execution and event publication.
@@ -140,11 +147,9 @@ defmodule Ming.Router do
   ## Options
   - `:to` - The handler module that will process the request (required)
   - `:function` - The handler function to call (default: `:execute`)
-
   - `:before_execute` - Optional function to prepare the request before execution
   - `:timeout` - Timeout for this specific request (overrides default)
   - `:metadata` - Additional metadata for the execution context
-
   - `:retry_attempts` - Number of retry attempts for this request
   - `:returning` - Specifies what should be returned from execution
 
@@ -170,6 +175,7 @@ defmodule Ming.Router do
     quote do
       Ming.SendRouter.send(unquote(request_module_or_modules), unquote(opts))
       Ming.PublishRouter.publish(unquote(request_module_or_modules), unquote(opts))
+      Ming.QueryRouter.query(unquote(request_module_or_modules), unquote(opts))
     end
   end
 
@@ -178,7 +184,11 @@ defmodule Ming.Router do
     quote generated: true do
       @doc false
       def __registered_requests__ do
-        requests = __registered_send_requests__() ++ __registered_publish_requests__()
+        requests =
+          __registered_send_requests__() ++
+            __registered_publish_requests__() ++
+            __registered_query_requests__()
+
         Enum.uniq(requests)
       end
     end
