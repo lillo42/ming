@@ -41,12 +41,12 @@ defmodule Ming.SendCompositeRouter do
 
   ## Options
   - `:otp_app` - The OTP application name (default: `:ming`)
-  - `:default_send_dispatch_opts` - Default options for command dispatch
+  - `:default_send_opts` - Default options for command send 
 
   ## Examples
       use Ming.SendCompositeRouter, 
         otp_app: :my_app,
-        default_send_dispatch_opts: [timeout: 10_000, retry_attempts: 3]
+        default_send_opts: [timeout: 10_000, retry_attempts: 3]
   """
   defmacro __using__(opts) do
     otp_app = Keyword.get(opts, :otp_app, :ming)
@@ -60,12 +60,12 @@ defmodule Ming.SendCompositeRouter do
 
       Module.register_attribute(__MODULE__, :registered_commands, accumulate: true)
 
-      default_send_dispatch_opts =
+      default_send_opts =
         unquote(opts)
-        |> Keyword.get(:default_send_dispatch_opts, [])
+        |> Keyword.get(:default_send_opts, [])
         |> Keyword.put(:application, unquote(otp_app))
 
-      @default_send_dispatch_opts default_send_dispatch_opts
+      @default_send_opts default_send_opts
     end
   end
 
@@ -151,7 +151,7 @@ defmodule Ming.SendCompositeRouter do
           @router Enum.at(router_modules, 0)
 
           defp do_send(%@command_module{} = command, opts) do
-            opts = Keyword.merge(@default_send_dispatch_opts, opts)
+            opts = Keyword.merge(@default_send_opts, opts)
 
             @router.send(command, opts)
           end

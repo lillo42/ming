@@ -10,8 +10,8 @@ defmodule Ming.SendRouter do
 
   ## Key Features
 
-  - Command registration via `send_dispatch/2` macro
-  - Middleware configuration via `send_middleware/1` macro  
+  - Command registration via `send/2` macro
+  - Middleware configuration via `send_middleware/1` macro
   - Automatic command validation and routing
   - Telemetry integration for monitoring
   - Configurable timeouts and retry mechanisms
@@ -28,8 +28,8 @@ defmodule Ming.SendRouter do
         send_middleware MyApp.AuthMiddleware
         send_middleware MyApp.LoggingMiddleware
 
-        send_dispatch CreateUser, to: UserHandler
-        send_dispatch UpdateUser, to: UserHandler, timeout: 10_000
+        send CreateUser, to: UserHandler
+        send UpdateUser, to: UserHandler, timeout: 10_000
       end
 
   Then you can send commands using the generated `send/1` and `send/2` functions:
@@ -72,7 +72,7 @@ defmodule Ming.SendRouter do
       Module.register_attribute(__MODULE__, :registered_send_requests, accumulate: true)
       Module.register_attribute(__MODULE__, :registered_send_middleware, accumulate: true)
 
-      @default_send_dispatch_opts [
+      @default_send_opts [
         application: unquote(otp_app),
         timeout: unquote(timeout),
         metadata: %{},
@@ -127,26 +127,26 @@ defmodule Ming.SendRouter do
   ## Examples
 
       # Single command
-      send_dispatch CreateUser, to: UserHandler
+      send CreateUser, to: UserHandler
 
       # Multiple commands
-      send_dispatch [CreateUser, UpdateUser], to: UserHandler
+      send [CreateUser, UpdateUser], to: UserHandler
 
       # With custom options
-      send_dispatch CreateUser,
+      send CreateUser,
         to: UserHandler,
         function: :handle_create,
         timeout: 10_000,
         metadata: %{source: "api"}
   """
-  defmacro send_dispatch(request_module_or_modules, opts) do
+  defmacro send(request_module_or_modules, opts) do
     opts = parse_send_opts(opts, [])
 
     for request_module <- List.wrap(request_module_or_modules) do
       quote do
         @registered_send_requests {
           unquote(request_module),
-          Keyword.merge(@default_send_dispatch_opts, unquote(opts))
+          Keyword.merge(@default_send_opts, unquote(opts))
         }
       end
     end

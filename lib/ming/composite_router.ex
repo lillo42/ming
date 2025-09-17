@@ -7,8 +7,8 @@ defmodule Ming.CompositeRouter do
 
     default_dispatch_opts = Keyword.get(opts, :default_dispatch_opts, [])
 
-    default_send_dispatch_opts =
-      case Keyword.get(opts, :default_send_dispatch_opts, []) do
+    default_send_opts =
+      case Keyword.get(opts, :default_send_opts, []) do
         [] ->
           default_dispatch_opts
 
@@ -16,8 +16,8 @@ defmodule Ming.CompositeRouter do
           send_opts
       end
 
-    default_publish_dispatch_opts =
-      case Keyword.get(opts, :default_publish_dispatch_opts, []) do
+    default_publish_opts =
+      case Keyword.get(opts, :default_publish_opts, []) do
         [] ->
           default_dispatch_opts
 
@@ -32,11 +32,11 @@ defmodule Ming.CompositeRouter do
 
       use Ming.SendCompositeRouter,
         otp_app: unquote(otp_app),
-        default_send_dispatch_opts: unquote(default_send_dispatch_opts)
+        default_send_opts: unquote(default_send_opts)
 
       use Ming.PublishCompositeRouter,
         otp_app: unquote(otp_app),
-        default_publish_dispatch_opts: unquote(default_publish_dispatch_opts),
+        default_publish_opts: unquote(default_publish_opts),
         max_concurrency: unquote(max_concurrency),
         concurrency_timeout: unquote(concurrency_timeout),
         task_supervisor: unquote(task_supervisor)

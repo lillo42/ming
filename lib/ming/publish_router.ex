@@ -31,9 +31,9 @@ defmodule Ming.PublishRouter do
         publish_middleware MyApp.EventValidationMiddleware
         publish_middleware MyApp.EventLoggingMiddleware
 
-        publish_dispatch UserCreated, to: UserProjection
-        publish_dispatch UserCreated, to: EmailNotifier
-        publish_dispatch OrderPlaced, to: OrderProcessor, timeout: 30_000
+        publish UserCreated, to: UserProjection
+        publish UserCreated, to: EmailNotifier
+        publish OrderPlaced, to: OrderProcessor, timeout: 30_000
       end
 
   Then you can publish events:
@@ -89,7 +89,7 @@ defmodule Ming.PublishRouter do
 
       @task_supervisor unquote(task_supervisor)
 
-      @default_publish_dispatch_opts [
+      @default_publish_opts [
         application: unquote(otp_app),
         timeout: unquote(timeout),
         metadata: %{},
@@ -143,29 +143,29 @@ defmodule Ming.PublishRouter do
 
   ## Examples
       # Single event to single handler
-      publish_dispatch UserCreated, to: UserProjection
+      publish UserCreated, to: UserProjection
 
       # Single event to multiple handlers
-      publish_dispatch UserCreated, to: UserProjection
-      publish_dispatch UserCreated, to: EmailNotifier
+      publish UserCreated, to: UserProjection
+      publish UserCreated, to: EmailNotifier
 
       # Multiple events to same handler
-      publish_dispatch [OrderCreated, OrderUpdated, OrderDeleted], to: OrderProjection
+      publish [OrderCreated, OrderUpdated, OrderDeleted], to: OrderProjection
 
       # With custom options
-      publish_dispatch PaymentProcessed,
+      publish PaymentProcessed,
         to: AccountingService,
         function: :handle_payment,
         timeout: 30_000
   """
-  defmacro publish_dispatch(request_module_or_modules, opts) do
+  defmacro publish(request_module_or_modules, opts) do
     opts = parse_publish_opts(opts, [])
 
     for request_module <- List.wrap(request_module_or_modules) do
       quote do
         @registered_publish_requests {
           unquote(request_module),
-          Keyword.merge(@default_publish_dispatch_opts, unquote(opts))
+          Keyword.merge(@default_publish_opts, unquote(opts))
         }
       end
     end
@@ -274,7 +274,7 @@ defmodule Ming.PublishRouter do
                     end)
 
         defp do_publish(%@event_module{} = event, opts) do
-          opts = Keyword.merge(@default_publish_dispatch_opts, opts)
+          opts = Keyword.merge(@default_publish_opts, opts)
 
           concurrency_timeout = Keyword.get(opts, :concurrency_timeout)
           max_concurrency = Keyword.get(opts, :max_concurrency, 1)

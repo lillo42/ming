@@ -49,14 +49,14 @@ defmodule Ming.PublishCompositeRouter do
   - `:max_concurrency` - Maximum number of concurrent router publications (default: `1`)
   - `:concurrency_timeout` - Timeout for concurrent publishing operations (default: `5000`)
   - `:task_supervisor` - Task supervisor for async operations (default: `Ming.TaskSupervisor`)
-  - `:default_publish_dispatch_opts` - Default options for event dispatch
+  - `:default_publish_opts` - Default options for event publish
 
   ## Examples
       use Ming.PublishCompositeRouter,
         otp_app: :my_app,
         max_concurrency: 5,
         concurrency_timeout: 30_000,
-        default_publish_dispatch_opts: [timeout: 15_000, metadata: %{source: "composite"}]
+        default_publish_opts: [timeout: 15_000, metadata: %{source: "composite"}]
   """
   defmacro __using__(opts) do
     otp_app = Keyword.get(opts, :otp_app, :ming)
@@ -75,12 +75,12 @@ defmodule Ming.PublishCompositeRouter do
 
       Module.register_attribute(__MODULE__, :registered_events, accumulate: true)
 
-      default_publish_dispatch_opts =
+      default_publish_opts =
         unquote(opts)
-        |> Keyword.get(:default_publish_dispatch_opts, [])
+        |> Keyword.get(:default_publish_opts, [])
         |> Keyword.put(:application, unquote(otp_app))
 
-      @default_publish_dispatch_opts default_publish_dispatch_opts
+      @default_publish_opts default_publish_opts
 
       @task_supervisor unquote(task_supervisor)
 
@@ -201,7 +201,7 @@ defmodule Ming.PublishCompositeRouter do
         @router_modules router_modules
 
         defp do_publish(%@event_module{} = event, opts) do
-          opts = Keyword.merge(@default_publish_dispatch_opts, opts)
+          opts = Keyword.merge(@default_publish_opts, opts)
 
           max_concurrency = Keyword.get(@composite_router_opts, :max_concurrency)
           concurrency_timeout = Keyword.fetch!(@composite_router_opts, :concurrency_timeout)

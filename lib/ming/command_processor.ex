@@ -16,8 +16,8 @@ defmodule Ming.CommandProcessor do
         max_concurrency: unquote(max_concurrency),
         concurrency_timeout: unquote(concurrency_timeout),
         task_supervisor: unquote(task_supervisor),
-        default_send_dispatch_opts: unquote(dispatch_opts),
-        default_publish_dispatch_opts: unquote(dispatch_opts)
+        default_send_opts: unquote(dispatch_opts),
+        default_publish_opts: unquote(dispatch_opts)
     end
   end
 
