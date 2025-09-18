@@ -20,6 +20,23 @@ defmodule Ming.CompositeRouterTest do
     end
   end
 
+  describe "query/2" do
+    test "a handler returning []" do
+      resp = Ming.SimpleComposeRouter.query(%Ming.ExampleCommand1{})
+      assert resp == :ok
+    end
+
+    test "error multi register for same command" do
+      resp = Ming.MultiComposeRouter.query(%Ming.ExampleCommand1{})
+      assert resp == {:error, :more_than_one_handler_found}
+    end
+
+    test "unregistered command" do
+      resp = Ming.SimpleComposeRouter.query(%Ming.ExampleCommand2{})
+      assert resp == {:error, :unregistered_query}
+    end
+  end
+
   describe "publish/2" do
     test "a handler returning ok" do
       resp = Ming.SimpleComposeRouter.publish(%Ming.ExampleEvent1{})
