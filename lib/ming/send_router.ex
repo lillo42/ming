@@ -9,16 +9,13 @@ defmodule Ming.SendRouter do
   appropriate handlers.
 
   ## Key Features
-
   - Command registration via `send/2` macro
   - Middleware configuration via `send_middleware/1` macro
   - Automatic command validation and routing
   - Telemetry integration for monitoring
   - Configurable timeouts and retry mechanisms
 
-
   ## Usage
-
   Use this module in your command routing modules to set up command handling:
 
       defmodule MyApp.SendRouter do
@@ -46,9 +43,7 @@ defmodule Ming.SendRouter do
   This macro is invoked when using `Ming.SendRouter` in another module.
   It registers module attributes and sets default configuration values.
 
-
   ## Options
-
   - `:otp_app` - The OTP application name (default: `:ming`)
   - `:timeout` - Default timeout for command execution in milliseconds (default: `5000`)
   - `:retry` - Default number of retry attempts for failed commands (default: `10`)
@@ -69,7 +64,7 @@ defmodule Ming.SendRouter do
 
       @before_compile unquote(__MODULE__)
 
-      Module.register_attribute(__MODULE__, :registered_send_requests, accumulate: true)
+      Module.register_attribute(__MODULE__, :registered_send, accumulate: true)
       Module.register_attribute(__MODULE__, :registered_send_middleware, accumulate: true)
 
       @default_send_opts [
@@ -89,9 +84,7 @@ defmodule Ming.SendRouter do
   This macro is invoked when using `Ming.SendRouter` in another module.
   It registers module attributes and sets default configuration values.
 
-
   ## Options
-
   - `:otp_app` - The OTP application name (default: `:ming`)
   - `:timeout` - Default timeout for command execution in milliseconds (default: `5000`)
   - `:retry` - Default number of retry attempts for failed commands (default: `10`)
@@ -144,7 +137,7 @@ defmodule Ming.SendRouter do
 
     for request_module <- List.wrap(request_module_or_modules) do
       quote do
-        @registered_send_requests {
+        @registered_send {
           unquote(request_module),
           Keyword.merge(@default_send_opts, unquote(opts))
         }
@@ -194,13 +187,13 @@ defmodule Ming.SendRouter do
     quote generated: true do
       @doc false
       def __registered_send_requests__ do
-        @registered_send_requests
+        @registered_send
         |> Enum.map(fn {request_module, _opts} -> request_module end)
         |> Enum.uniq()
       end
 
       @registered_send_requests_by_module Enum.group_by(
-                                            @registered_send_requests,
+                                            @registered_send,
                                             fn {request_module, _opts} -> request_module end,
                                             fn {_request_module, opts} -> opts end
                                           )

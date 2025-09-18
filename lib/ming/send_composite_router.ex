@@ -31,7 +31,6 @@ defmodule Ming.SendCompositeRouter do
       MyApp.CompositeSendRouter.send(%CreateInvoice{...})
       MyApp.CompositeSendRouter.send(%UpdateInventory{...})
   """
-  require Logger
 
   @doc """
   Sets up the SendCompositeRouter module with configuration options.
@@ -88,12 +87,9 @@ defmodule Ming.SendCompositeRouter do
   """
   defmacro send_router(router_module) do
     quote do
-      # if Kernel.function_exported?(unquote(router_module), :__registered_send_requests__, 0) do
       for command_module <- unquote(router_module).__registered_send_requests__() do
         @registered_commands {command_module, unquote(router_module)}
       end
-
-      # end
     end
   end
 
