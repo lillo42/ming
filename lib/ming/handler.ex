@@ -53,15 +53,13 @@ defmodule Ming.Handler do
   alias Ming.Telemetry
 
   @doc """
-  Execute the given command against the aggregate.
+  Execute the given command against the handler.
 
     - `context` - includes command execution arguments
-
-      (see `Commanded.Aggregates.ExecutionContext` for details).
-    - `timeout` - an non-negative integer which specifies how many milliseconds
-      to wait for a reply, or the atom :infinity to wait indefinitely.
+      (see `Ming.ExecutionContext` for details).
+    - `timeout` - a non-negative integer which specifies how many milliseconds
+      to wait for a reply, or the atom `:infinity` to wait indefinitely.
       The default value is five seconds (5,000ms).
-
 
   ## Return values
 

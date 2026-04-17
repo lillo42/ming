@@ -12,23 +12,21 @@ defmodule Ming.Middleware do
 
       defmodule MyMiddleware do
         @behaviour Ming.Middleware
-        
 
         @impl true
-        def before_dispatch(pipeline) do
+        def before_dispatch(pipeline, _opts) do
           # Modify pipeline before dispatch
           pipeline
         end
-        
+
         @impl true
-        def after_dispatch(pipeline) do
+        def after_dispatch(pipeline, _opts) do
           # Modify pipeline after successful dispatch
           pipeline
         end
 
-        
         @impl true
-        def after_failure(pipeline) do
+        def after_failure(pipeline, _opts) do
           # Handle pipeline failures
           pipeline
         end
@@ -48,6 +46,19 @@ defmodule Ming.Middleware do
   Middleware are executed in the order they are configured.
   """
 
+  @type opts() ::
+          binary()
+          | tuple()
+          | atom()
+          | integer()
+          | float()
+          | [opts()]
+          | %{optional(opts()) => opts()}
+          | MapSet.t()
+          | nil
+
+  @callback init(opts()) :: opts()
+
   @doc """
   Called before a message is dispatched to the message broker.
 
@@ -66,14 +77,14 @@ defmodule Ming.Middleware do
   - Modified `Ming.Pipeline.t()` that will be used for dispatch
 
   ## Examples
-      def before_dispatch(pipeline) do
-        Logger.info("Dispatching message: \#{inspect(pipeline.message)}")
-        # Add timestamp to message metadata
-        Ming.Pipeline.put_metadata(pipeline, :timestamp, DateTime.utc_now())
+      def before_dispatch(pipeline, _opts) do
+        Logger.info("Dispatching request: \#{inspect(pipeline.request)}")
+        # Add timestamp to request metadata
+        Ming.Pipeline.assign_metadata(pipeline, :timestamp, DateTime.utc_now())
       end
 
   """
-  @callback before_dispatch(pipeline :: Ming.Pipeline.t()) :: Ming.Pipeline.t()
+  @callback before_dispatch(pipeline :: Ming.Pipeline.t(), opts :: opts()) :: Ming.Pipeline.t()
 
   @doc """
   Called after a message is successfully dispatched to the broker.
@@ -88,24 +99,21 @@ defmodule Ming.Middleware do
   - Recording metrics and performance data
 
   ## Parameters
-
   - `pipeline`: The current `Ming.Pipeline.t()` state after successful dispatch
-
 
   ## Returns
   - Modified `Ming.Pipeline.t()` for final processing
 
-
   ## Examples
-      def after_dispatch(pipeline) do
-        Logger.info("Message successfully dispatched to \#{pipeline.topic}")
-        Metrics.increment("messages.sent")
+      def after_dispatch(pipeline, _opts) do
+        Logger.info("Request successfully dispatched")
+        Metrics.increment("requests.sent")
 
         pipeline
       end
 
   """
-  @callback after_dispatch(pipeline :: Ming.Pipeline.t()) :: Ming.Pipeline.t()
+  @callback after_dispatch(pipeline :: Ming.Pipeline.t(), opts :: opts()) :: Ming.Pipeline.t()
 
   @doc """
   Called when message dispatch fails at any point in the pipeline.
@@ -122,21 +130,16 @@ defmodule Ming.Middleware do
   ## Parameters
   - `pipeline`: The current `Ming.Pipeline.t()` state containing error information
 
-
   ## Returns
-
   - Modified `Ming.Pipeline.t()` for error handling continuation
 
-
   ## Examples
-      def after_failure(pipeline) do
-        Logger.error("Dispatch failed: \#{inspect(pipeline.error)}")
+      def after_failure(pipeline, _opts) do
+        Logger.error("Dispatch failed: \#{inspect(pipeline.assigns[:error])}")
 
-        # Move message to dead letter queue
-        DeadLetterQueue.add(pipeline.message, pipeline.error)
         pipeline
       end
 
   """
-  @callback after_failure(pipeline :: Ming.Pipeline.t()) :: Ming.Pipeline.t()
+  @callback after_failure(pipeline :: Ming.Pipeline.t(), opts :: opts()) :: Ming.Pipeline.t()
 end

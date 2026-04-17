@@ -1,5 +1,10 @@
 defmodule Ming.Telemetry do
-  @moduledoc false
+  @moduledoc """
+  Provides telemetry helpers for the Ming framework.
+
+  This module wraps `:telemetry` to emit start, stop, and exception events
+  with consistent measurements and metadata across the framework.
+  """
 
   def start(event_prefix, metadata \\ %{}, additional_measurements \\ %{}) do
     start_time = System.monotonic_time()

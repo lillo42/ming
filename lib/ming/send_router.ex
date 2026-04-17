@@ -79,18 +79,17 @@ defmodule Ming.SendRouter do
   end
 
   @doc """
-  Sets up the SendRouter module with configuration options.
+  Registers middleware for command processing.
 
-  This macro is invoked when using `Ming.SendRouter` in another module.
-  It registers module attributes and sets default configuration values.
+  Middleware modules are executed in the order they are registered and can
+  intercept and transform commands before they reach their handlers.
 
-  ## Options
-  - `:otp_app` - The OTP application name (default: `:ming`)
-  - `:timeout` - Default timeout for command execution in milliseconds (default: `5000`)
-  - `:retry` - Default number of retry attempts for failed commands (default: `10`)
+  ## Parameters
+  - `middleware_module` - The middleware module to register
 
   ## Examples
-      use Ming.SendRouter, otp_app: :my_app, timeout: 10_000, retry: 5
+      send_middleware MyApp.AuthMiddleware
+      send_middleware MyApp.LoggingMiddleware
   """
   defmacro send_middleware(middleware_module) do
     quote do
@@ -215,7 +214,11 @@ defmodule Ming.SendRouter do
 
         if Enum.count(command_opts) == 1 do
           @command_opts Enum.at(command_opts, 0)
-                        |> Keyword.put(:middleware, @registered_send_middleware)
+                        |> Keyword.put(
+                          :middleware,
+                          Keyword.get(Enum.at(command_opts, 0), :middleware, []) ++
+                            List.wrap(@registered_send_middleware)
+                        )
 
           defp do_send(%@command_module{} = request, opts) do
             alias Ming.Dispatcher
@@ -300,7 +303,8 @@ defmodule Ming.SendRouter do
     :to,
     :function,
     :before_execute,
-    :timeout
+    :timeout,
+    :middleware
   ]
 
   defp parse_send_opts([{:to, handler} | opts], result) do

@@ -4,28 +4,23 @@ defmodule Ming.PublishRouter do
 
   This module enables event-driven architecture by allowing events to be published
   to multiple handlers concurrently. It supports both synchronous and asynchronous
-
   event publishing with configurable concurrency, timeouts, and retry mechanisms.
 
   ## Key Features
-
   - Event registration and routing to multiple handlers
   - Synchronous and asynchronous event publishing
-
   - Configurable concurrency control for parallel event processing
   - Middleware support for cross-cutting concerns
   - Telemetry integration for monitoring event processing
   - Error aggregation for handling multiple handler failures
 
   ## Usage
-
   Use this module to create event routers that handle event publication:
 
       defmodule MyApp.PublishRouter do
-        use Ming.PublishRouter, 
+        use Ming.PublishRouter,
           otp_app: :my_app,
           timeout: 10_000,
-
           max_concurrency: 5
 
         publish_middleware MyApp.EventValidationMiddleware
@@ -41,7 +36,7 @@ defmodule Ming.PublishRouter do
       # Synchronous publishing
       MyApp.PublishRouter.publish(%UserCreated{id: 123, name: "John"})
 
-      # Asynchronous publishing  
+      # Asynchronous publishing
       task = MyApp.PublishRouter.publish_async(%OrderPlaced{order_id: "456", amount: 100.0})
       Task.await(task)
   """
@@ -270,7 +265,12 @@ defmodule Ming.PublishRouter do
       for {event_module, event_opts} <- @registered_publish_requests_by_module do
         @event_module event_module
         @event_opts Enum.map(event_opts, fn opts ->
-                      Keyword.put(opts, :middleware, @registered_publish_middleware)
+                      Keyword.put(
+                        opts,
+                        :middleware,
+                        Keyword.get(Enum.at(opts, 0), :middleware, []) ++
+                          List.wrap(@registered_publish_middleware)
+                      )
                     end)
 
         defp do_publish(%@event_module{} = event, opts) do
@@ -362,7 +362,8 @@ defmodule Ming.PublishRouter do
     :to,
     :function,
     :before_execute,
-    :timeout
+    :timeout,
+    :middleware
   ]
 
   defp parse_publish_opts([{:to, handler} | opts], result) do

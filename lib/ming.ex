@@ -9,7 +9,8 @@ defmodule Ming do
   ## Key Features
   - **Command Processing**: Robust command handling with middleware support
   - **Event Publishing**: Concurrent event processing with configurable concurrency controls
-  - **Routing System**: Flexible routing for both commands and events
+  - **Query Execution**: Read-optimized query routing with middleware support
+  - **Routing System**: Flexible routing for commands, events, and queries
   - **Middleware Pipeline**: Extensible middleware system for cross-cutting concerns
   - **Telemetry Integration**: Comprehensive monitoring and metrics
   - **Concurrency Control**: Configurable parallel processing for high-throughput scenarios
@@ -19,8 +20,8 @@ defmodule Ming do
 
   1. **Command Processor** (`Ming.CommandProcessor`) - Top-level command handling
   2. **Composite Routers** (`Ming.CompositeRouter`) - Aggregate multiple routers
-  3. **Individual Routers** (`Ming.Router`) - Unified command and event routing
-  4. **Send/Publish Routers** (`Ming.SendRouter`, `Ming.PublishRouter`) - Specialized routing
+  3. **Individual Routers** (`Ming.Router`) - Unified command, event, and query routing
+  4. **Send/Publish/Query Routers** (`Ming.SendRouter`, `Ming.PublishRouter`, `Ming.QueryRouter`) - Specialized routing
   5. **Dispatcher** (`Ming.Dispatcher`) - Core dispatching mechanism
   6. **Execution Context** (`Ming.ExecutionContext`) - Command execution context
   7. **Pipeline** (`Ming.Pipeline`) - Middleware pipeline management
@@ -32,7 +33,7 @@ defmodule Ming do
 
       defp deps do
         [
-          {:ming, "~> 0.1.0"}
+          {:ming, "~> 0.1.2"}
         ]
       end
 
@@ -70,9 +71,10 @@ defmodule Ming do
   ### Core Modules
   - `Ming.CommandProcessor` - Top-level command processing interface
   - `Ming.CompositeRouter` - Aggregation of multiple routers
-  - `Ming.Router` - Unified command and event routing
+  - `Ming.Router` - Unified command, event, and query routing
   - `Ming.SendRouter` - Command sending infrastructure
   - `Ming.PublishRouter` - Event publishing infrastructure
+  - `Ming.QueryRouter` - Query execution infrastructure
 
   ### Support Modules
   - `Ming.Dispatcher` - Core dispatching mechanism

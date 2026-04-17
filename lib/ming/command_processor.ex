@@ -18,16 +18,13 @@ defmodule Ming.CommandProcessor do
 
       defmodule MyApp.CommandProcessor do
         use Ming.CommandProcessor,
-
           otp_app: :my_app,
           max_concurrency: 4,
           concurrency_timeout: 30_000,
-
           dispatch_opts: [timeout: 15_000, retry_attempts: 3]
 
         # Include domain routers that contain command handlers
         router MyApp.Accounting.Router
-
         router MyApp.Inventory.Router
         router MyApp.Shipping.Router
       end
@@ -63,7 +60,6 @@ defmodule Ming.CommandProcessor do
 
   ## Required Options
   - `:otp_app` - Must be provided and cannot be defaulted
-
 
   ## Examples
       use Ming.CommandProcessor,

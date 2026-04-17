@@ -3,7 +3,6 @@ defmodule Ming.Dispatcher do
   The core dispatching module for the Ming CQRS framework.
 
   This module is responsible for processing command payloads through the Ming pipeline,
-
   executing handlers, managing middleware, and handling retries and errors. It serves as
   the central coordinator for command execution in the Ming framework.
 
@@ -14,7 +13,6 @@ defmodule Ming.Dispatcher do
   4. Execute after_dispatch middleware on success
   5. Execute after_failure middleware on errors
   6. Return formatted response
-
 
   ## Usage
 

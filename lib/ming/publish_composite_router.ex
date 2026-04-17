@@ -4,7 +4,6 @@ defmodule Ming.PublishCompositeRouter do
 
   This module allows you to combine multiple `Ming.PublishRouter` modules into a single composite
   router, providing a unified interface for publishing events across different domains or
-
   bounded contexts within your application.
 
   ## Key Features
