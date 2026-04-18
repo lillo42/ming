@@ -137,9 +137,7 @@ defmodule Ming.QueryRouter do
 
   ## Examples
       # Single query to single handler
-
       query GetUserById, to: UserQueryHandler
-
 
       # Multiple queries to same handler
       query [GetUserById, GetUserByEmail, ListUsers], to: UserQueryHandler
@@ -147,7 +145,6 @@ defmodule Ming.QueryRouter do
       # With custom function and timeout
       query SearchProducts,
         to: ProductQueryHandler,
-
         function: :search,
         timeout: 30_000,
         metadata: %{cacheable: true}
@@ -276,7 +273,8 @@ defmodule Ming.QueryRouter do
               handler_function: function,
               handler_before_execute: before_execute,
               middleware: middlewares,
-              returning: :events
+              returning: :events,
+              type: :query
             }
 
             Dispatcher.dispatch(payload)

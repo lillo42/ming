@@ -189,7 +189,7 @@ defmodule Ming.PublishRouter do
   with additional configuration options.
   """
   @callback publish(
-              command :: struct(),
+              event :: struct(),
               timeout_or_opts :: non_neg_integer() | :infinity | Keyword.t()
             ) :: publish_resp()
 
@@ -351,7 +351,8 @@ defmodule Ming.PublishRouter do
           handler_function: function,
           handler_before_execute: before_execute,
           middleware: middlewares,
-          returning: returning
+          returning: returning,
+          type: :event
         }
 
         Dispatcher.dispatch(payload)

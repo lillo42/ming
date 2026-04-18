@@ -49,6 +49,7 @@ defmodule Ming.Dispatcher do
     - `:metadata` - Additional metadata for the execution context
     - `:retry_attempts` - Number of retry attempts remaining
     - `:returning` - Specifies what should be returned from execution (:events, :execution_result, or false)
+    - `:type` - The dispatch type: `:command`, `:event`, `:query`, or `:unknown`
     - `:middleware` - List of middleware modules to execute during processing
     """
 
@@ -66,6 +67,7 @@ defmodule Ming.Dispatcher do
       :metadata,
       :retry_attempts,
       :returning,
+      type: :unknown,
       middleware: []
     ]
   end
@@ -231,7 +233,11 @@ defmodule Ming.Dispatcher do
   end
 
   @doc false
-  defp telemetry_stop(%Pipeline{assigns: assigns} = pipeline, start_time, telemetry_metadata) do
+  defp telemetry_stop(
+         %Pipeline{assigns: assigns} = pipeline,
+         start_time,
+         telemetry_metadata
+       ) do
     event_prefix = [:ming, :application, :dispatch]
 
     case assigns do
@@ -254,7 +260,8 @@ defmodule Ming.Dispatcher do
     %{
       application: application,
       error: nil,
-      execution_context: context
+      execution_context: context,
+      dispatcher_type: payload.type
     }
   end
 

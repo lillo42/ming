@@ -84,45 +84,46 @@ defmodule Ming do
   - `Ming.Middleware` - Middleware behavior definition
 
   ### Infrastructure
+  - `Ming.TaskSupervisor` - Task supervision for async operations
   - `Ming.Telemetry` - Telemetry and monitoring integration
-
-  ## Configuration
-  Ming can be configured in your `config/config.exs`:
-
-      config :ming,
-        default_timeout: 15_000,
-        max_concurrency: 4,
-        task_supervisor: MyApp.TaskSupervisor
 
   ## Telemetry
   Ming emits telemetry events for monitoring:
-  - `[:ming, :application, :dispatch, :start]` - Command/event dispatch started
-  - `[:ming, :application, :dispatch, :stop]` - Command/event dispatch completed
+
+  ### Dispatch telemetry
+  - `[:ming, :application, :dispatch, :start]` - Dispatch started
+  - `[:ming, :application, :dispatch, :stop]` - Dispatch completed
+
+  Metadata includes:
+  - `:application` - The OTP application name
+  - `:execution_context` - The `Ming.ExecutionContext` struct
+  - `:dispatcher_type` - `:command`, `:event`, `:query`, or `:unknown`
+  - `:error` - Present only on stop events when dispatch fails
+
+  ### Handler telemetry
   - `[:ming, :handler, :execute, :start]` - Handler execution started
   - `[:ming, :handler, :execute, :stop]` - Handler execution completed
-  - `[:ming, :handler, :execute, :exception]` - Handler raised an exception
+  - `[:ming, :handler, :execute, :exception]` - Handler raised an exception or threw
 
   ## Example
 
       # Define a command
       defmodule CreateUser do
-        defstruct [:name, :email, :password]
+        defstruct [:name, :email]
       end
-
 
       # Define a handler
       defmodule UserHandler do
-        def execute(%CreateUser{} = command) do
+        def execute(%CreateUser{} = command, _context) do
           # Business logic here
-          {:ok, [%UserCreated{id: UUID.generate(), name: command.name, email: command.email}]}
+          :ok
         end
       end
 
       # Send the command
       MyApp.CommandProcessor.send(%CreateUser{
         name: "John Doe",
-        email: "john@example.com",
-        password: "secret"
+        email: "john@example.com"
       })
 
   ## Philosophy

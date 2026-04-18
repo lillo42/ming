@@ -3,7 +3,6 @@ defmodule Ming.SendRouter do
   Provides a macro-based routing system for sending commands in the Ming framework.
 
   This module allows you to define command routing configurations using macros that
-
   generate the necessary dispatching code at compile time. It handles command registration,
   middleware configuration, and provides a clean API for sending commands to their
   appropriate handlers.
@@ -253,7 +252,8 @@ defmodule Ming.SendRouter do
               handler_function: function,
               handler_before_execute: before_execute,
               middleware: middlewares,
-              returning: returning
+              returning: returning,
+              type: :command
             }
 
             Dispatcher.dispatch(payload)
@@ -312,7 +312,7 @@ defmodule Ming.SendRouter do
   defp parse_send_opts([{:to, handler} | opts], result) do
     result =
       Keyword.put_new(result, :function, :execute)
-      |> Keyword.put_new(:to, handler)
+      |> Keyword.put(:to, handler)
 
     parse_send_opts(opts, result)
   end

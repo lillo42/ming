@@ -4,42 +4,26 @@ defmodule Ming.DispatcherTest do
   alias Ming.ExecutionContext
 
   describe "telemetry on exception" do
-    setup do
-      test_pid = self()
-
-      handler = fn event, measurements, metadata, _config ->
-        send(test_pid, {:telemetry_event, event, measurements, metadata})
-      end
-
-      :telemetry.attach_many(
-        "test-handler-#{System.unique_integer([:positive])}",
-        [
+    test "emits telemetry stop when before_dispatch raises" do
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [
           [:ming, :application, :dispatch, :start],
           [:ming, :application, :dispatch, :stop]
-        ],
-        handler,
-        nil
-      )
+        ])
 
-      on_exit(fn ->
-        :telemetry.detach("test-handler-#{System.unique_integer([:positive])}")
-      end)
-
-      :ok
-    end
-
-    test "emits telemetry stop when before_dispatch raises" do
       assert_raise ArgumentError, "middleware raised", fn ->
         Ming.RaiseBeforeDispatchRouter.send(%Ming.ExampleCommand1{})
       end
 
-      assert_receive {:telemetry_event, [:ming, :application, :dispatch, :start], _measurements,
-                      _metadata},
+      assert_receive {[:ming, :application, :dispatch, :start], ^ref, _measurements,
+                      %{dispatcher_type: :command}},
                      1_000
 
-      assert_receive {:telemetry_event, [:ming, :application, :dispatch, :stop], _measurements,
+      assert_receive {[:ming, :application, :dispatch, :stop], ^ref, _measurements,
                       %{error: %ArgumentError{message: "middleware raised"}}},
                      1_000
+
+      :telemetry.detach(ref)
     end
   end
 
