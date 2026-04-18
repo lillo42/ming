@@ -3,7 +3,6 @@ defmodule Ming.QueryCompositeRouter do
   Provides a composite routing system that aggregates multiple QueryRouters in the Ming framework.
 
   This module allows you to combine multiple `Ming.QueryRouter` modules into a single composite
-
   router, providing a unified interface for query execution across different domains or
   bounded contexts within your application.
 
@@ -18,15 +17,13 @@ defmodule Ming.QueryCompositeRouter do
   Use this module to create a composite query router that combines multiple domain-specific query routers:
 
       defmodule MyApp.CompositeQueryRouter do
-        use Ming.QueryCompositeRouter, 
-
+        use Ming.QueryCompositeRouter,
           otp_app: :my_app,
           default_query_opts: [timeout: 10_000, metadata: %{source: "composite"}]
 
         # Include query routers from different bounded contexts
-
         query_router MyApp.Accounting.QueryRouter
-        query_router MyApp.Inventory.QueryRouter  
+        query_router MyApp.Inventory.QueryRouter
         query_router MyApp.Customer.QueryRouter
         query_router MyApp.Reporting.QueryRouter
       end
@@ -83,7 +80,6 @@ defmodule Ming.QueryCompositeRouter do
   Includes a QueryRouter module in the composite router.
 
   This macro registers all queries from the specified QueryRouter module,
-
   making them available through the composite router interface.
 
   ## Parameters

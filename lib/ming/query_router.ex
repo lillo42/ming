@@ -17,7 +17,7 @@ defmodule Ming.QueryRouter do
   Use this module to create query routers that handle query execution:
 
       defmodule MyApp.QueryRouter do
-        use Ming.QueryRouter, 
+        use Ming.QueryRouter,
           otp_app: :my_app,
           timeout: 10_000,
           retry_attempts: 3
@@ -29,7 +29,6 @@ defmodule Ming.QueryRouter do
         query GetUserById, to: UserQueryHandler
         query GetUserByEmail, to: UserQueryHandler, function: :by_email
         query ListUsers, to: UserQueryHandler, timeout: 30_000
-
       end
 
   Then you can execute queries:
@@ -138,9 +137,7 @@ defmodule Ming.QueryRouter do
 
   ## Examples
       # Single query to single handler
-
       query GetUserById, to: UserQueryHandler
-
 
       # Multiple queries to same handler
       query [GetUserById, GetUserByEmail, ListUsers], to: UserQueryHandler
@@ -148,7 +145,6 @@ defmodule Ming.QueryRouter do
       # With custom function and timeout
       query SearchProducts,
         to: ProductQueryHandler,
-
         function: :search,
         timeout: 30_000,
         metadata: %{cacheable: true}
@@ -239,7 +235,11 @@ defmodule Ming.QueryRouter do
 
         if Enum.count(query_opts) == 1 do
           @query_opts Enum.at(query_opts, 0)
-                      |> Keyword.put(:middleware, @registered_query_middleware)
+                      |> Keyword.put(
+                        :middleware,
+                        Keyword.get(Enum.at(query_opts, 0), :middleware, []) ++
+                          List.wrap(@registered_query_middleware)
+                      )
 
           defp do_query(%@query_module{} = request, opts) do
             alias Ming.Dispatcher
@@ -273,7 +273,8 @@ defmodule Ming.QueryRouter do
               handler_function: function,
               handler_before_execute: before_execute,
               middleware: middlewares,
-              returning: :events
+              returning: :events,
+              type: :query
             }
 
             Dispatcher.dispatch(payload)
@@ -308,7 +309,7 @@ defmodule Ming.QueryRouter do
         Telemetry.stop(
           event_prefix,
           start_time,
-          Map.put(telemetry_metadata, :error, :unregistered_command)
+          Map.put(telemetry_metadata, :error, :unregistered_query)
         )
 
         {:error, :unregistered_query}
@@ -325,11 +326,18 @@ defmodule Ming.QueryRouter do
     :to,
     :function,
     :before_execute,
-    :timeout
+    :timeout,
+    :middleware,
+    :retry_attempts,
+    :returning
   ]
 
   defp parse_query_opts([{:to, handler} | opts], result) do
-    parse_query_opts(opts, [function: :execute, to: handler] ++ result)
+    result =
+      Keyword.put_new(result, :function, :execute)
+      |> Keyword.put(:to, handler)
+
+    parse_query_opts(opts, result)
   end
 
   defp parse_query_opts([{param, value} | opts], result) when param in @register_query_params do

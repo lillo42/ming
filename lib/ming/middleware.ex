@@ -12,23 +12,21 @@ defmodule Ming.Middleware do
 
       defmodule MyMiddleware do
         @behaviour Ming.Middleware
-        
 
         @impl true
-        def before_dispatch(pipeline) do
+        def before_dispatch(pipeline, _opts) do
           # Modify pipeline before dispatch
           pipeline
         end
-        
+
         @impl true
-        def after_dispatch(pipeline) do
+        def after_dispatch(pipeline, _opts) do
           # Modify pipeline after successful dispatch
           pipeline
         end
 
-        
         @impl true
-        def after_failure(pipeline) do
+        def after_failure(pipeline, _opts) do
           # Handle pipeline failures
           pipeline
         end
@@ -46,7 +44,69 @@ defmodule Ming.Middleware do
 
   Add middleware modules to your Ming pipeline configuration to enable them.
   Middleware are executed in the order they are configured.
+
+  Middleware can be registered as a bare module or as a `{module, opts}` tuple:
+
+      middleware MyMiddleware
+      middleware {MyMiddleware, retry_attempts: 3}
+
+  When a tuple is used, `init/1` is called with the provided opts. When a bare
+  module is used, `init/1` is called with `nil`. The returned value is then
+  passed as the second argument to each stage callback.
   """
+
+  @typedoc """
+  Type representing middleware options.
+
+  Options can be any Elixir term, including nested structures.
+  This flexibility allows middleware to accept arbitrary configuration data.
+
+  ## Examples
+
+      "binary string"
+      :atom_option
+      {MyModule, retry_attempts: 3}
+      [nested: [opts: :value]]
+      %{key => value}
+      nil
+
+  """
+  @type opts() ::
+          binary()
+          | tuple()
+          | atom()
+          | integer()
+          | float()
+          | [opts()]
+          | %{optional(opts()) => opts()}
+          | MapSet.t()
+          | nil
+
+  @doc """
+  Initialize middleware options.
+
+  This callback is called when middleware is registered in the pipeline.
+  It receives the options provided at registration time and returns
+  transformed options that will be passed to all stage callbacks.
+
+  ## Parameters
+
+  - `opts`: The options provided when middleware was registered. If registered
+    as a bare module, this will be `nil`.
+
+  ## Returns
+
+  - Transformed options to be passed to `before_dispatch/2`, `after_dispatch/2`,
+    and `after_failure/2`
+
+  ## Examples
+
+      def init(opts) do
+        Keyword.validate!(opts, [:timeout, :retries])
+      end
+
+  """
+  @callback init(opts()) :: opts()
 
   @doc """
   Called before a message is dispatched to the message broker.
@@ -66,14 +126,14 @@ defmodule Ming.Middleware do
   - Modified `Ming.Pipeline.t()` that will be used for dispatch
 
   ## Examples
-      def before_dispatch(pipeline) do
-        Logger.info("Dispatching message: \#{inspect(pipeline.message)}")
-        # Add timestamp to message metadata
-        Ming.Pipeline.put_metadata(pipeline, :timestamp, DateTime.utc_now())
+      def before_dispatch(pipeline, _opts) do
+        Logger.info("Dispatching request: \#{inspect(pipeline.request)}")
+        # Add timestamp to request metadata
+        Ming.Pipeline.assign_metadata(pipeline, :timestamp, DateTime.utc_now())
       end
 
   """
-  @callback before_dispatch(pipeline :: Ming.Pipeline.t()) :: Ming.Pipeline.t()
+  @callback before_dispatch(pipeline :: Ming.Pipeline.t(), opts :: opts()) :: Ming.Pipeline.t()
 
   @doc """
   Called after a message is successfully dispatched to the broker.
@@ -88,24 +148,21 @@ defmodule Ming.Middleware do
   - Recording metrics and performance data
 
   ## Parameters
-
   - `pipeline`: The current `Ming.Pipeline.t()` state after successful dispatch
-
 
   ## Returns
   - Modified `Ming.Pipeline.t()` for final processing
 
-
   ## Examples
-      def after_dispatch(pipeline) do
-        Logger.info("Message successfully dispatched to \#{pipeline.topic}")
-        Metrics.increment("messages.sent")
+      def after_dispatch(pipeline, _opts) do
+        Logger.info("Request successfully dispatched")
+        Metrics.increment("requests.sent")
 
         pipeline
       end
 
   """
-  @callback after_dispatch(pipeline :: Ming.Pipeline.t()) :: Ming.Pipeline.t()
+  @callback after_dispatch(pipeline :: Ming.Pipeline.t(), opts :: opts()) :: Ming.Pipeline.t()
 
   @doc """
   Called when message dispatch fails at any point in the pipeline.
@@ -122,21 +179,16 @@ defmodule Ming.Middleware do
   ## Parameters
   - `pipeline`: The current `Ming.Pipeline.t()` state containing error information
 
-
   ## Returns
-
   - Modified `Ming.Pipeline.t()` for error handling continuation
 
-
   ## Examples
-      def after_failure(pipeline) do
-        Logger.error("Dispatch failed: \#{inspect(pipeline.error)}")
+      def after_failure(pipeline, _opts) do
+        Logger.error("Dispatch failed: \#{inspect(pipeline.assigns[:error])}")
 
-        # Move message to dead letter queue
-        DeadLetterQueue.add(pipeline.message, pipeline.error)
         pipeline
       end
 
   """
-  @callback after_failure(pipeline :: Ming.Pipeline.t()) :: Ming.Pipeline.t()
+  @callback after_failure(pipeline :: Ming.Pipeline.t(), opts :: opts()) :: Ming.Pipeline.t()
 end

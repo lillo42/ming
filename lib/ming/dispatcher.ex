@@ -3,7 +3,6 @@ defmodule Ming.Dispatcher do
   The core dispatching module for the Ming CQRS framework.
 
   This module is responsible for processing command payloads through the Ming pipeline,
-
   executing handlers, managing middleware, and handling retries and errors. It serves as
   the central coordinator for command execution in the Ming framework.
 
@@ -14,7 +13,6 @@ defmodule Ming.Dispatcher do
   4. Execute after_dispatch middleware on success
   5. Execute after_failure middleware on errors
   6. Return formatted response
-
 
   ## Usage
 
@@ -51,9 +49,15 @@ defmodule Ming.Dispatcher do
     - `:metadata` - Additional metadata for the execution context
     - `:retry_attempts` - Number of retry attempts remaining
     - `:returning` - Specifies what should be returned from execution (:events, :execution_result, or false)
+    - `:type` - The dispatch type: `:command`, `:event`, `:query`, or `:unknown`
     - `:middleware` - List of middleware modules to execute during processing
     """
 
+    @typedoc """
+    The dispatcher payload struct type.
+
+    Encapsulates all information required to execute a command through the pipeline.
+    """
     @type t :: %__MODULE__{}
 
     defstruct [
@@ -68,6 +72,7 @@ defmodule Ming.Dispatcher do
       :metadata,
       :retry_attempts,
       :returning,
+      type: :unknown,
       middleware: []
     ]
   end
@@ -97,12 +102,10 @@ defmodule Ming.Dispatcher do
       }
 
       case Ming.Dispatcher.dispatch(payload) do
-        {:ok, events} -> 
+        {:ok, events} ->
           # Handle successful execution with events
-        {:error, reason} -> 
-
+        {:error, reason} ->
           # Handle execution failure
-
       end
   """
   @spec dispatch(payload :: Payload.t()) :: :ok | {:ok, any()} | {:error, any()}
@@ -112,21 +115,32 @@ defmodule Ming.Dispatcher do
 
     start_time = telemetry_start(telemetry_metadata)
 
-    pipeline = before_dispatch(pipeline, payload)
+    try do
+      pipeline = before_dispatch(pipeline, payload)
 
-    # Stop command execution if pipeline has been halted
-    if Pipeline.halted?(pipeline) do
-      pipeline
-      |> after_failure(payload)
-      |> telemetry_stop(start_time, telemetry_metadata)
-      |> Pipeline.response()
-    else
-      context = to_execution_context(pipeline, payload)
+      # Stop command execution if pipeline has been halted
+      if Pipeline.halted?(pipeline) do
+        pipeline
+        |> after_failure(payload)
+        |> telemetry_stop(start_time, telemetry_metadata)
+        |> Pipeline.response()
+      else
+        context = to_execution_context(pipeline, payload)
 
-      pipeline
-      |> execute(payload, context)
-      |> telemetry_stop(start_time, telemetry_metadata)
-      |> Pipeline.response()
+        pipeline
+        |> execute(payload, context)
+        |> telemetry_stop(start_time, telemetry_metadata)
+        |> Pipeline.response()
+      end
+    rescue
+      error ->
+        Telemetry.stop(
+          [:ming, :application, :dispatch],
+          start_time,
+          Map.put(telemetry_metadata, :error, error)
+        )
+
+        reraise error, __STACKTRACE__
     end
   end
 
@@ -168,7 +182,7 @@ defmodule Ming.Dispatcher do
 
   @doc false
   defp to_execution_context(%Pipeline{} = pipeline, %Payload{} = payload) do
-    %Pipeline{request: request, request_uuid: resquest_uuid, metadata: metadata} = pipeline
+    %Pipeline{request: request, request_uuid: request_uuid, metadata: metadata} = pipeline
 
     %Payload{
       correlation_id: correlation_id,
@@ -181,7 +195,7 @@ defmodule Ming.Dispatcher do
 
     %ExecutionContext{
       request: request,
-      causation_id: resquest_uuid,
+      causation_id: request_uuid,
       correlation_id: correlation_id,
       metadata: metadata,
       handler: handler_module,
@@ -212,19 +226,6 @@ defmodule Ming.Dispatcher do
   end
 
   @doc false
-  defp after_failure(
-         %Pipeline{response: {:error, error, reason}} = pipeline,
-         %Payload{} = payload
-       ) do
-    %Payload{middleware: middleware} = payload
-
-    pipeline
-    |> Pipeline.assign(:error, error)
-    |> Pipeline.assign(:error_reason, reason)
-    |> Pipeline.chain(:after_failure, middleware)
-  end
-
-  @doc false
   defp after_failure(%Pipeline{} = pipeline, %Payload{} = payload) do
     %Payload{middleware: middleware} = payload
 
@@ -233,12 +234,16 @@ defmodule Ming.Dispatcher do
 
   @doc false
   defp telemetry_start(telemetry_metadata) do
-    Telemetry.start([:commanded, :application, :dispatch], telemetry_metadata)
+    Telemetry.start([:ming, :application, :dispatch], telemetry_metadata)
   end
 
   @doc false
-  defp telemetry_stop(%Pipeline{assigns: assigns} = pipeline, start_time, telemetry_metadata) do
-    event_prefix = [:commanded, :application, :dispatch]
+  defp telemetry_stop(
+         %Pipeline{assigns: assigns} = pipeline,
+         start_time,
+         telemetry_metadata
+       ) do
+    event_prefix = [:ming, :application, :dispatch]
 
     case assigns do
       %{error: error} ->
@@ -260,7 +265,8 @@ defmodule Ming.Dispatcher do
     %{
       application: application,
       error: nil,
-      execution_context: context
+      execution_context: context,
+      dispatcher_type: payload.type
     }
   end
 

@@ -26,9 +26,14 @@ defmodule Ming.ExecutionResult do
   completion of message processing.
   """
 
+  @typedoc """
+  The execution result struct type.
+
+  Captures the events and metadata produced by a successful message execution.
+  """
   @type t :: %__MODULE__{
           events: list(struct()),
-          metadata: struct()
+          metadata: map()
         }
 
   @enforce_keys [:events, :metadata]

@@ -10,13 +10,11 @@ defmodule Ming.Pipeline do
 
   The pipeline is represented as a struct with the following fields:
   - `:application` - The application context or configuration
-
   - `:correlation_id` - A UUIDv7 identifier for tracing requests across services
   - `:request` - The incoming message or request to be processed
   - `:request_uuid` - Optional UUIDv7 identifier for the specific request
   - `:response` - The processed response or result
   - `:metadata` - Additional metadata for the processing context
-
   - `:assigns` - Key-value storage for arbitrary data between middleware
   - `:halted` - Boolean flag indicating if processing should stop
 
@@ -26,15 +24,20 @@ defmodule Ming.Pipeline do
   where each middleware can transform the pipeline state, add metadata, or halt processing.
   """
 
-  @type t :: %{
+  @typedoc """
+  The pipeline struct type.
+
+  Represents the state of a message as it flows through middleware stages.
+  """
+  @type t :: %__MODULE__{
           application: term() | nil,
           correlation_id: UUIDv7.t(),
           request: any(),
           request_uuid: UUIDv7.t() | nil,
-          respose: any() | nil,
+          response: any() | nil,
           metadata: map(),
           halted: boolean(),
-          assigned: map()
+          assigns: map()
         }
 
   defstruct [
@@ -61,7 +64,6 @@ defmodule Ming.Pipeline do
 
   ## Returns
   - Updated `Ming.Pipeline.t()` with the new assignment
-
 
   ## Examples
       pipeline = Pipeline.assign(pipeline, :user_id, 123)
@@ -172,13 +174,15 @@ defmodule Ming.Pipeline do
   Processes the pipeline through a list of middleware for a specific stage.
 
   This function recursively applies each middleware module to the pipeline
-
   for the given stage (e.g., `:before_dispatch`, `:after_dispatch`).
 
   Processing stops if:
   - The middleware list is empty
-  - The pipeline is already halted
+  - The pipeline is already halted (only for `:before_dispatch` and `:after_dispatch`)
   - All middleware has been processed
+
+  Note: `:after_failure` middleware always runs even when the pipeline is halted,
+  matching the behavior of Commanded.
 
   ## Parameters
   - `pipeline`: The current `Ming.Pipeline.t()`
@@ -187,7 +191,6 @@ defmodule Ming.Pipeline do
 
   ## Returns
   - Updated `Ming.Pipeline.t()` after processing all middleware
-
 
   ## Examples
       pipeline = Pipeline.chain(pipeline, :before_dispatch, [AuthMiddleware, LogMiddleware])
@@ -198,7 +201,11 @@ defmodule Ming.Pipeline do
 
   def chain(%__MODULE__{halted: true} = pipeline, :after_dispatch, _middleware), do: pipeline
 
+  def chain(%__MODULE__{} = pipeline, stage, [{module, opts} | modules]) do
+    chain(apply(module, stage, [pipeline, module.init(opts)]), stage, modules)
+  end
+
   def chain(%__MODULE__{} = pipeline, stage, [module | modules]) do
-    chain(apply(module, stage, [pipeline]), stage, modules)
+    chain(apply(module, stage, [pipeline, module.init(nil)]), stage, modules)
   end
 end

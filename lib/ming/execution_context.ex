@@ -9,17 +9,16 @@ defmodule Ming.ExecutionContext do
   ## Context Fields
 
   - `:request` - The command to be executed (typically a struct)
-  - `:causation_id` - A UUID identifying the command that caused this execution :cite[1]
-  - `:correlation_id` - A UUID used to correlate related commands and events :cite[1]
+  - `:causation_id` - A UUID identifying the command that caused this execution
+  - `:correlation_id` - A UUID used to correlate related commands and events
   - `:handler` - The module responsible for handling the command
   - `:function` - The function name (as atom) that handles the command (defaults to `:execute`)
-  - `:before_execute` - Optional function to prepare the command before execution :cite[1]
+  - `:before_execute` - Optional function to prepare the command before execution
   - `:retry_attempts` - Number of retry attempts remaining for handling failures
   - `:returning` - Specifies what should be returned from successful execution
   - `:metadata` - Key/value pairs of metadata associated with the execution
 
   ## Usage
-
 
   The execution context flows through the command processing pipeline, allowing middleware
   to intercept and transform the context at various stages. It supports retry mechanisms
@@ -38,6 +37,24 @@ defmodule Ming.ExecutionContext do
     metadata: %{}
   ]
 
+  @typedoc """
+  The execution context struct type.
+
+  Encapsulates all information required to execute a command, including
+  the request, correlation data, handler configuration, and metadata.
+  """
+  @type t :: %__MODULE__{
+          request: any(),
+          causation_id: UUIDv7.t() | nil,
+          correlation_id: UUIDv7.t() | nil,
+          handler: module() | nil,
+          function: atom(),
+          before_execute: atom() | nil,
+          retry_attempts: non_neg_integer(),
+          returning: :events | :execution_result | false | nil,
+          metadata: map()
+        }
+
   @doc """
   Attempts to retry the execution by decrementing the retry attempts counter.
 
@@ -52,14 +69,12 @@ defmodule Ming.ExecutionContext do
   - `{:ok, updated_context}` if retries are available
   - `{:error, :too_many_attempts}` if no retries remain
 
-
   ## Examples
       case Ming.ExecutionContext.retry(context) do
-        {:ok, updated_context} -> 
+        {:ok, updated_context} ->
           # Retry with updated context
-        {:error, :too_many_attempts} -> 
+        {:error, :too_many_attempts} ->
           # Handle retry exhaustion
-
       end
   """
   def retry(%__MODULE__{retry_attempts: nil}),
@@ -88,21 +103,18 @@ defmodule Ming.ExecutionContext do
 
   ## Returns
   - Formatted response based on the context's `:returning` setting:
-
     - `:events` -> `{:ok, list_of_events}`
     - `:execution_result` -> `{:ok, %Ming.ExecutionResult{}}`
-
     - `false` or `nil` -> `:ok`
 
   ## Examples
       # With returning: :events
-      format_reply({:ok, [event1, event2]}, context) 
+      format_reply({:ok, [event1, event2]}, context)
       # => {:ok, [event1, event2]}
 
-      # With returning: :execution_result  
+      # With returning: :execution_result
       format_reply({:ok, [event1, event2]}, context)
       # => {:ok, %Ming.ExecutionResult{events: [event1, event2], metadata: %{}}}
-
 
       # With returning: false
       format_reply({:ok, [event1, event2]}, context)
@@ -118,7 +130,7 @@ defmodule Ming.ExecutionContext do
       :execution_result ->
         result = %Ming.ExecutionResult{
           events: events,
-          metadata: metadata
+          metadata: metadata || %{}
         }
 
         {:ok, result}
@@ -127,6 +139,9 @@ defmodule Ming.ExecutionContext do
         :ok
 
       nil ->
+        :ok
+
+      _ ->
         :ok
     end
   end
@@ -137,5 +152,9 @@ defmodule Ming.ExecutionContext do
 
   def format_reply({:error, error, _stacktrace}, _context) do
     {:error, error}
+  end
+
+  def format_reply(reply, _context) do
+    reply
   end
 end

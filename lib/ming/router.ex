@@ -2,20 +2,20 @@ defmodule Ming.Router do
   @moduledoc """
   Provides a unified routing interface that combines both command sending and event publishing capabilities.
 
-  This module serves as a convenience wrapper that combines `Ming.SendRouter`, `Ming.PublishRouter` and `Ming.QueryRouter`
-  functionality into a single module. It allows you to define both command and event routing in one place,
+  This module serves as a convenience wrapper that combines `Ming.SendRouter`, `Ming.PublishRouter`, and `Ming.QueryRouter`
+  functionality into a single module. It allows you to define command, event, and query routing in one place,
   with shared configuration and middleware.
 
   ## Key Features
-  - Unified interface for both command sending, event publishing and executing query
-  - Shared middleware configuration for both command, event and query pipelines
-  - Combined command and event registration
-  - Consistent configuration across both routing types
-  - Aggregate request registration for both commands and events
+  - Unified interface for command sending, event publishing, and query execution
+  - Shared middleware configuration for command, event, and query pipelines
+  - Combined command, event, and query registration
+  - Consistent configuration across all routing types
+  - Aggregate request registration for commands, events, and queries
 
   ## Usage
 
-  Use this module to create a comprehensive router that handles both commands and events:
+  Use this module to create a comprehensive router that handles commands, events, and queries:
 
       defmodule MyApp.Router do
         use Ming.Router,
@@ -28,7 +28,6 @@ defmodule Ming.Router do
         # Middleware applied to both commands and events
         middleware MyApp.AuthMiddleware
         middleware MyApp.LoggingMiddleware
-
         middleware MyApp.MetricsMiddleware
 
         # Register commands (sent to single handler)
@@ -56,7 +55,7 @@ defmodule Ming.Router do
   Sets up the combined Router module with configuration options.
 
   This macro is invoked when using `Ming.Router` in another module.
-  It sets up both SendRouter and PublishRouter functionality with shared configuration.
+  It sets up SendRouter, PublishRouter, and QueryRouter functionality with shared configuration.
 
   ## Options
   - `:ming` - The OTP application name (required)
@@ -110,8 +109,8 @@ defmodule Ming.Router do
   @doc """
   Registers middleware for both command and event processing pipelines.
 
-  This macro applies the specified middleware to both the SendRouter and PublishRouter,
-  ensuring consistent cross-cutting concerns across both command and event processing.
+  This macro applies the specified middleware to the SendRouter, PublishRouter, and QueryRouter,
+  ensuring consistent cross-cutting concerns across command, event, and query processing.
 
   ## Parameters
   - `middleware_module` - The middleware module to register for both pipelines
@@ -120,7 +119,6 @@ defmodule Ming.Router do
       middleware MyApp.AuthMiddleware
       middleware MyApp.LoggingMiddleware
       middleware MyApp.ValidationMiddleware
-
 
   ## Note
   The middleware module must implement both the `Ming.Middleware` behaviour for command
@@ -137,12 +135,12 @@ defmodule Ming.Router do
   @doc """
   Registers a request for both command sending, event publishing and query execution.
 
-  This macro registers the specified request module with both the SendRouter and PublishRouter,
-  allowing it to be used for both command execution and event publication.
+  This macro registers the specified request module with the SendRouter, PublishRouter,
+  and QueryRouter, allowing it to be used for command execution, event publication, and query execution.
 
   ## Parameters
   - `request_module_or_modules` - A single request module or list of request modules
-  - `opts` - Configuration options for both command and event dispatch
+  - `opts` - Configuration options for command, event, and query dispatch
 
   ## Options
   - `:to` - The handler module that will process the request (required)

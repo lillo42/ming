@@ -27,7 +27,7 @@ defmodule Ming.Handler do
 
   telemetry_event(%{
     event: [:ming, :handler, :execute, :exception],
-    description: "Emitted when an handler raises an exception",
+    description: "Emitted when a handler raises an exception",
     measurements: "%{duration: non_neg_integer()}",
     metadata: """
     %{application: Ming.CommandProcessor.t(),
@@ -53,20 +53,19 @@ defmodule Ming.Handler do
   alias Ming.Telemetry
 
   @doc """
-  Execute the given command against the aggregate.
+  Execute the given command against the handler.
 
     - `context` - includes command execution arguments
-
-      (see `Commanded.Aggregates.ExecutionContext` for details).
-    - `timeout` - an non-negative integer which specifies how many milliseconds
-      to wait for a reply, or the atom :infinity to wait indefinitely.
+      (see `Ming.ExecutionContext` for details).
+    - `timeout` - a non-negative integer which specifies how many milliseconds
+      to wait for a reply, or the atom `:infinity` to wait indefinitely.
       The default value is five seconds (5,000ms).
-
 
   ## Return values
 
-  Returns `{:ok, response}` on success, or `{:error, error}`
-  on failure.
+  Returns `{:ok, response}` on success, `{:error, error}` on failure,
+  `{:error, error, stacktrace}` when the handler raises an exception,
+  or `{:error, reason}` when the handler throws.
 
     - `response` - response produced by the handler, can be an empty list.
   """
@@ -130,6 +129,10 @@ defmodule Ming.Handler do
       Logger.error(Exception.format(:error, error, stacktrace))
 
       {:error, error, stacktrace}
+  catch
+    kind, reason ->
+      Logger.error("handler #{kind}: #{inspect(reason)}")
+      {:error, reason}
   end
 
   defp before_execute_command(%ExecutionContext{before_execute: nil}), do: :ok

@@ -26,15 +26,14 @@ defmodule Ming.CompositeRouter do
           default_send_opts: [timeout: 10_000, retry_attempts: 3],
           default_publish_opts: [timeout: 20_000, max_concurrency: 5]
 
-        # Include both command and event routers from different domains
+        # Include command, event, and query routers from different domains
         router MyApp.Accounting.Router
         router MyApp.Inventory.Router
-
         router MyApp.Shipping.Router
         router MyApp.Analytics.Router
       end
 
-  Then you can use the master router for both commands and events across all domains:
+  Then you can use the master router for commands, events, and queries across all domains:
 
       # Send commands through the composite
       MyApp.MasterRouter.send(%CreateInvoice{...})
@@ -49,7 +48,7 @@ defmodule Ming.CompositeRouter do
   Sets up the CompositeRouter module with configuration options.
 
   This macro is invoked when using `Ming.CompositeRouter` in another module.
-  It sets up both SendCompositeRouter and PublishCompositeRouter functionality
+  It sets up SendCompositeRouter, PublishCompositeRouter, and QueryCompositeRouter functionality
   with shared and specific configuration options.
 
   ## Options
@@ -57,9 +56,10 @@ defmodule Ming.CompositeRouter do
   - `:max_concurrency` - Maximum number of concurrent event publications (default: `1`)
   - `:concurrency_timeout` - Timeout for concurrent publishing operations (default: `5000`)
   - `:task_supervisor` - Task supervisor for async operations (default: `Ming.TaskSupervisor`)
-  - `:default_dispatch_opts` - Default options applied to both send and publish operations
+  - `:default_dispatch_opts` - Default options applied to send, publish, and query operations
   - `:default_send_opts` - Specific default options for send operations (overrides dispatch opts)
   - `:default_publish_opts` - Specific default options for publish operations (overrides dispatch opts)
+  - `:default_query_opts` - Specific default options for query operations (overrides dispatch opts)
 
   ## Examples
       use Ming.CompositeRouter,
@@ -128,14 +128,14 @@ defmodule Ming.CompositeRouter do
   end
 
   @doc """
-  Includes a router module in both the Send, Publish and Query composite routers.
+  Includes a router module in the Send, Publish, and Query composite routers.
 
-  This macro registers the specified router module with both the SendCompositeRouter,
-  PublishCompositeRouter and QueryCompositeRouter, making all its commands and events 
-  available through the master composite interface.
+  This macro registers the specified router module with the SendCompositeRouter,
+  PublishCompositeRouter, and QueryCompositeRouter, making all its commands, events,
+  and queries available through the master composite interface.
 
   ## Parameters
-  - `router_module` - The router module to include in both composites
+  - `router_module` - The router module to include in the composite
 
   ## Examples
       router MyApp.Accounting.Router
@@ -143,8 +143,9 @@ defmodule Ming.CompositeRouter do
       router MyApp.Shipping.Router
 
   ## Note
-  The included router module should implement both `__registered_send_requests__/0`
-  and `__registered_publish_requests__/0` functions to be properly integrated.
+  The included router module should implement `__registered_send_requests__/0`,
+  `__registered_publish_requests__/0`, and `__registered_query_requests__/0` functions
+  to be properly integrated.
   """
   defmacro router(router_module) do
     quote do

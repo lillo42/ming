@@ -7,14 +7,12 @@ defmodule Ming.SendCompositeRouter do
   bounded contexts within your application.
 
   ## Key Features
-
   - Aggregates multiple SendRouter modules into a single routing interface
   - Provides unified command dispatch across different application domains
   - Handles command routing conflicts between different routers
   - Maintains the same API as individual SendRouter modules
 
   ## Usage
-
   Use this module to create a composite router that combines multiple domain-specific routers:
 
       defmodule MyApp.CompositeSendRouter do
@@ -22,7 +20,7 @@ defmodule Ming.SendCompositeRouter do
 
         # Include routers from different bounded contexts
         send_router MyApp.Accounting.SendRouter
-        send_router MyApp.Inventory.SendRouter  
+        send_router MyApp.Inventory.SendRouter
         send_router MyApp.Shipping.SendRouter
       end
 
@@ -40,10 +38,10 @@ defmodule Ming.SendCompositeRouter do
 
   ## Options
   - `:otp_app` - The OTP application name (default: `:ming`)
-  - `:default_send_opts` - Default options for command send 
+  - `:default_send_opts` - Default options for command send
 
   ## Examples
-      use Ming.SendCompositeRouter, 
+      use Ming.SendCompositeRouter,
         otp_app: :my_app,
         default_send_opts: [timeout: 10_000, retry_attempts: 3]
   """

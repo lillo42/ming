@@ -9,7 +9,8 @@ defmodule Ming do
   ## Key Features
   - **Command Processing**: Robust command handling with middleware support
   - **Event Publishing**: Concurrent event processing with configurable concurrency controls
-  - **Routing System**: Flexible routing for both commands and events
+  - **Query Execution**: Read-optimized query routing with middleware support
+  - **Routing System**: Flexible routing for commands, events, and queries
   - **Middleware Pipeline**: Extensible middleware system for cross-cutting concerns
   - **Telemetry Integration**: Comprehensive monitoring and metrics
   - **Concurrency Control**: Configurable parallel processing for high-throughput scenarios
@@ -18,9 +19,9 @@ defmodule Ming do
   Ming follows a layered architecture:
 
   1. **Command Processor** (`Ming.CommandProcessor`) - Top-level command handling
-  2. **Composite Routers** (`Ming.CompositeRouter`) - Aggregate multiple routers
-  3. **Individual Routers** (`Ming.Router`) - Unified command and event routing
-  4. **Send/Publish Routers** (`Ming.SendRouter`, `Ming.PublishRouter`) - Specialized routing
+  2. **Composite Routers** (`Ming.CompositeRouter`, `Ming.SendCompositeRouter`, `Ming.PublishCompositeRouter`, `Ming.QueryCompositeRouter`) - Aggregate multiple routers
+  3. **Individual Routers** (`Ming.Router`) - Unified command, event, and query routing
+  4. **Send/Publish/Query Routers** (`Ming.SendRouter`, `Ming.PublishRouter`, `Ming.QueryRouter`) - Specialized routing
   5. **Dispatcher** (`Ming.Dispatcher`) - Core dispatching mechanism
   6. **Execution Context** (`Ming.ExecutionContext`) - Command execution context
   7. **Pipeline** (`Ming.Pipeline`) - Middleware pipeline management
@@ -32,7 +33,7 @@ defmodule Ming do
 
       defp deps do
         [
-          {:ming, "~> 0.1.0"}
+          {:ming, "~> 0.1.2"}
         ]
       end
 
@@ -70,9 +71,10 @@ defmodule Ming do
   ### Core Modules
   - `Ming.CommandProcessor` - Top-level command processing interface
   - `Ming.CompositeRouter` - Aggregation of multiple routers
-  - `Ming.Router` - Unified command and event routing
+  - `Ming.Router` - Unified command, event, and query routing
   - `Ming.SendRouter` - Command sending infrastructure
   - `Ming.PublishRouter` - Event publishing infrastructure
+  - `Ming.QueryRouter` - Query execution infrastructure
 
   ### Support Modules
   - `Ming.Dispatcher` - Core dispatching mechanism
@@ -85,44 +87,43 @@ defmodule Ming do
   - `Ming.TaskSupervisor` - Task supervision for async operations
   - `Ming.Telemetry` - Telemetry and monitoring integration
 
-  ## Configuration
-  Ming can be configured in your `config/config.exs`:
-
-      config :ming,
-        default_timeout: 15_000,
-        max_concurrency: 4,
-        task_supervisor: MyApp.TaskSupervisor
-
   ## Telemetry
   Ming emits telemetry events for monitoring:
-  - `[:ming, :command, :start]` - Command processing started
-  - `[:ming, :command, :stop]` - Command processing completed
-  - `[:ming, :command, :exception]` - Command processing error
-  - `[:ming, :event, :publish]` - Event publication
-  - `[:ming, :dispatch, :start]` - Dispatch started
-  - `[:ming, :dispatch, :stop]` - Dispatch completed
+
+  ### Dispatch telemetry
+  - `[:ming, :application, :dispatch, :start]` - Dispatch started
+  - `[:ming, :application, :dispatch, :stop]` - Dispatch completed
+
+  Metadata includes:
+  - `:application` - The OTP application name
+  - `:execution_context` - The `Ming.ExecutionContext` struct
+  - `:dispatcher_type` - `:command`, `:event`, `:query`, or `:unknown`
+  - `:error` - Present only on stop events when dispatch fails
+
+  ### Handler telemetry
+  - `[:ming, :handler, :execute, :start]` - Handler execution started
+  - `[:ming, :handler, :execute, :stop]` - Handler execution completed
+  - `[:ming, :handler, :execute, :exception]` - Handler raised an exception or threw
 
   ## Example
 
       # Define a command
       defmodule CreateUser do
-        defstruct [:name, :email, :password]
+        defstruct [:name, :email]
       end
-
 
       # Define a handler
       defmodule UserHandler do
-        def execute(%CreateUser{} = command) do
+        def execute(%CreateUser{} = command, _context) do
           # Business logic here
-          {:ok, [%UserCreated{id: UUID.generate(), name: command.name, email: command.email}]}
+          :ok
         end
       end
 
       # Send the command
       MyApp.CommandProcessor.send(%CreateUser{
         name: "John Doe",
-        email: "john@example.com",
-        password: "secret"
+        email: "john@example.com"
       })
 
   ## Philosophy

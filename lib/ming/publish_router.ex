@@ -4,28 +4,23 @@ defmodule Ming.PublishRouter do
 
   This module enables event-driven architecture by allowing events to be published
   to multiple handlers concurrently. It supports both synchronous and asynchronous
-
   event publishing with configurable concurrency, timeouts, and retry mechanisms.
 
   ## Key Features
-
   - Event registration and routing to multiple handlers
   - Synchronous and asynchronous event publishing
-
   - Configurable concurrency control for parallel event processing
   - Middleware support for cross-cutting concerns
   - Telemetry integration for monitoring event processing
   - Error aggregation for handling multiple handler failures
 
   ## Usage
-
   Use this module to create event routers that handle event publication:
 
       defmodule MyApp.PublishRouter do
-        use Ming.PublishRouter, 
+        use Ming.PublishRouter,
           otp_app: :my_app,
           timeout: 10_000,
-
           max_concurrency: 5
 
         publish_middleware MyApp.EventValidationMiddleware
@@ -41,7 +36,7 @@ defmodule Ming.PublishRouter do
       # Synchronous publishing
       MyApp.PublishRouter.publish(%UserCreated{id: 123, name: "John"})
 
-      # Asynchronous publishing  
+      # Asynchronous publishing
       task = MyApp.PublishRouter.publish_async(%OrderPlaced{order_id: "456", amount: 100.0})
       Task.await(task)
   """
@@ -194,7 +189,7 @@ defmodule Ming.PublishRouter do
   with additional configuration options.
   """
   @callback publish(
-              command :: struct(),
+              event :: struct(),
               timeout_or_opts :: non_neg_integer() | :infinity | Keyword.t()
             ) :: publish_resp()
 
@@ -245,12 +240,14 @@ defmodule Ming.PublishRouter do
       def publish_async(event, opts), do: do_publish_async(event, opts)
 
       defp do_publish_async(event, opts) do
+        timeout = Keyword.get(opts, :timeout, :infinity)
+
         Task.Supervisor.async_nolink(
           @task_supervisor,
           __MODULE__,
           :publish,
           [event, opts],
-          timeout: Keyword.fetch!(opts, :timeout)
+          timeout: timeout
         )
       end
 
@@ -270,7 +267,12 @@ defmodule Ming.PublishRouter do
       for {event_module, event_opts} <- @registered_publish_requests_by_module do
         @event_module event_module
         @event_opts Enum.map(event_opts, fn opts ->
-                      Keyword.put(opts, :middleware, @registered_publish_middleware)
+                      Keyword.put(
+                        opts,
+                        :middleware,
+                        Keyword.get(opts, :middleware, []) ++
+                          List.wrap(@registered_publish_middleware)
+                      )
                     end)
 
         defp do_publish(%@event_module{} = event, opts) do
@@ -281,11 +283,7 @@ defmodule Ming.PublishRouter do
 
           resp =
             do_batch_dispatch(event, @event_opts, opts, max_concurrency, concurrency_timeout)
-
-          resp =
-            resp
-            |> Enum.filter(fn item -> publish_errors?(item) end)
-            |> Enum.map(fn item -> elem(item, 1) end)
+            |> Enum.flat_map(&extract_publish_errors/1)
 
           if Enum.empty?(resp) do
             :ok
@@ -297,18 +295,26 @@ defmodule Ming.PublishRouter do
 
       defp do_publish(_event, _opts), do: :ok
 
-      defp publish_errors?(:ok), do: false
-      defp publish_errors?({:ok, _resp}), do: false
-      defp publish_errors?(_resp), do: true
+      defp extract_publish_errors(:ok), do: []
+
+      defp extract_publish_errors({:ok, result}) when is_tuple(result),
+        do: extract_publish_errors(result)
+
+      defp extract_publish_errors({:ok, _}), do: []
+      defp extract_publish_errors({:error, errors}) when is_list(errors), do: errors
+      defp extract_publish_errors({:error, reason}), do: [reason]
+      defp extract_publish_errors({:exit, reason}), do: [reason]
+      defp extract_publish_errors(other), do: [other]
 
       defp do_batch_dispatch(event, ming_opts, user_opts, 1, _concurrency_timeout) do
-        Enum.map(ming_opts, fn opts -> do_dispatch(event, opts, user_opts) end)
+        Enum.map(ming_opts, &do_dispatch(event, &1, user_opts))
       end
 
       defp do_batch_dispatch(event, ming_opts, user_opts, max_concurrency, concurrency_timeout) do
         Task.async_stream(
           ming_opts,
           fn opts -> do_dispatch(event, opts, user_opts) end,
+          ordered: false,
           max_concurrency: max_concurrency,
           timeout: concurrency_timeout
         )
@@ -345,7 +351,8 @@ defmodule Ming.PublishRouter do
           handler_function: function,
           handler_before_execute: before_execute,
           middleware: middlewares,
-          returning: returning
+          returning: returning,
+          type: :event
         }
 
         Dispatcher.dispatch(payload)
@@ -362,11 +369,18 @@ defmodule Ming.PublishRouter do
     :to,
     :function,
     :before_execute,
-    :timeout
+    :timeout,
+    :middleware,
+    :retry_attempts,
+    :returning
   ]
 
   defp parse_publish_opts([{:to, handler} | opts], result) do
-    parse_publish_opts(opts, [function: :execute, to: handler] ++ result)
+    result =
+      Keyword.put_new(result, :function, :execute)
+      |> Keyword.put(:to, handler)
+
+    parse_publish_opts(opts, result)
   end
 
   defp parse_publish_opts([{param, value} | opts], result)
