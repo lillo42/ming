@@ -127,7 +127,9 @@ defmodule Ming.Dispatcher do
       end
     rescue
       error ->
-        Telemetry.stop([:ming, :application, :dispatch], start_time,
+        Telemetry.stop(
+          [:ming, :application, :dispatch],
+          start_time,
           Map.put(telemetry_metadata, :error, error)
         )
 

@@ -11,9 +11,9 @@ defmodule Ming.TrackingRouter do
   alias Ming.ReturningOkHandler
   alias Ming.TrackingMiddleware
 
-  middleware TrackingMiddleware
+  middleware(TrackingMiddleware)
 
-  dispatch ExampleCommand1, to: ReturningOkHandler
-  dispatch ExampleEvent1, to: ReturningErrorHandler
-  dispatch ExampleEvent1, to: ReturningOkHandler
+  dispatch(ExampleCommand1, to: ReturningOkHandler)
+  dispatch(ExampleEvent1, to: ReturningErrorHandler)
+  dispatch(ExampleEvent1, to: ReturningOkHandler)
 end

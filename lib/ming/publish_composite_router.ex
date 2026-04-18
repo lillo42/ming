@@ -242,7 +242,10 @@ defmodule Ming.PublishCompositeRouter do
       end
 
       defp extract_publish_errors(:ok), do: []
-      defp extract_publish_errors({:ok, result}) when is_tuple(result), do: extract_publish_errors(result)
+
+      defp extract_publish_errors({:ok, result}) when is_tuple(result),
+        do: extract_publish_errors(result)
+
       defp extract_publish_errors({:ok, _}), do: []
       defp extract_publish_errors({:error, errors}) when is_list(errors), do: errors
       defp extract_publish_errors({:error, error}), do: [error]

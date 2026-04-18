@@ -7,6 +7,6 @@ defmodule Ming.QueryRouterTestRouter do
   alias Ming.ExampleEvent1
   alias Ming.QueryHandler
 
-  query ExampleCommand1, to: QueryHandler
-  query ExampleEvent1, to: QueryHandler
+  query(ExampleCommand1, to: QueryHandler)
+  query(ExampleEvent1, to: QueryHandler)
 end

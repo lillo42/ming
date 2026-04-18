@@ -176,7 +176,9 @@ defmodule Ming.RouteTest do
     end
 
     test "returning :execution_result" do
-      resp = Ming.ExecutionResultRouter.send(%Ming.ExampleCommand1{}, returning: :execution_result)
+      resp =
+        Ming.ExecutionResultRouter.send(%Ming.ExampleCommand1{}, returning: :execution_result)
+
       assert {:ok, %Ming.ExecutionResult{events: [:some_reply], metadata: %{}}} = resp
     end
   end

@@ -6,5 +6,5 @@ defmodule Ming.ExecutionResultRouter do
   alias Ming.ExampleCommand1
   alias Ming.ReturningNonEmptyListHandler
 
-  dispatch ExampleCommand1, to: ReturningNonEmptyListHandler, returning: :execution_result
+  dispatch(ExampleCommand1, to: ReturningNonEmptyListHandler, returning: :execution_result)
 end

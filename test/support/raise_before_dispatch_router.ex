@@ -9,7 +9,7 @@ defmodule Ming.RaiseBeforeDispatchRouter do
   alias Ming.ReturningOkHandler
   alias Ming.RaiseBeforeDispatchMiddleware
 
-  middleware RaiseBeforeDispatchMiddleware
+  middleware(RaiseBeforeDispatchMiddleware)
 
-  dispatch ExampleCommand1, to: ReturningOkHandler
+  dispatch(ExampleCommand1, to: ReturningOkHandler)
 end

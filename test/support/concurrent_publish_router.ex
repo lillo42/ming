@@ -9,6 +9,6 @@ defmodule Ming.ConcurrentPublishRouter do
   alias Ming.ExampleHandler2
   alias Ming.ReturningErrorHandler
 
-  publish ExampleEvent1, to: ReturningErrorHandler
-  publish ExampleEvent1, to: ExampleHandler2
+  publish(ExampleEvent1, to: ReturningErrorHandler)
+  publish(ExampleEvent1, to: ExampleHandler2)
 end

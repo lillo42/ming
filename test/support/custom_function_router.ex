@@ -6,5 +6,5 @@ defmodule Ming.CustomFunctionRouter do
   alias Ming.ExampleCommand1
   alias Ming.CustomFunctionHandler
 
-  publish ExampleCommand1, to: CustomFunctionHandler, function: :handle
+  publish(ExampleCommand1, to: CustomFunctionHandler, function: :handle)
 end

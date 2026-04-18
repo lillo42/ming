@@ -6,5 +6,5 @@ defmodule Ming.BeforeExecuteRouter do
   alias Ming.BeforeExecuteHandler
   alias Ming.ExampleCommand1
 
-  dispatch ExampleCommand1, to: BeforeExecuteHandler, before_execute: :before
+  dispatch(ExampleCommand1, to: BeforeExecuteHandler, before_execute: :before)
 end
