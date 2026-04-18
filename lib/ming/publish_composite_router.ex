@@ -109,10 +109,8 @@ defmodule Ming.PublishCompositeRouter do
   """
   defmacro publish_router(router_module) do
     quote do
-      if Kernel.function_exported?(unquote(router_module), :__registered_publish_requests__, 0) do
-        for event_module <- unquote(router_module).__registered_publish_requests__() do
-          @registered_events {event_module, unquote(router_module)}
-        end
+      for event_module <- unquote(router_module).__registered_publish_requests__() do
+        @registered_events {event_module, unquote(router_module)}
       end
     end
   end
@@ -207,10 +205,7 @@ defmodule Ming.PublishCompositeRouter do
 
           resp =
             do_batch_publish(event, opts, @router_modules, max_concurrency, concurrency_timeout)
-            |> Stream.filter(fn item -> publish_errors?(item) end)
-            |> Stream.map(fn item -> elem(item, 1) end)
-            |> Stream.flat_map(fn item -> item end)
-            |> Enum.to_list()
+            |> Enum.flat_map(&extract_publish_errors/1)
 
           if Enum.empty?(resp) do
             :ok
@@ -225,7 +220,11 @@ defmodule Ming.PublishCompositeRouter do
       end
 
       defp do_publish_async(event, opts) do
-        Task.Supervisor.async_nolink(@task_supervisor, fn -> publish(event, opts) end)
+        timeout = Keyword.get(opts, :timeout, :infinity)
+
+        Task.Supervisor.async_nolink(@task_supervisor, fn -> publish(event, opts) end,
+          timeout: timeout
+        )
       end
 
       defp do_batch_publish(event, opts, router_modules, 1, _concurrency_timeout) do
@@ -242,8 +241,13 @@ defmodule Ming.PublishCompositeRouter do
         )
       end
 
-      defp publish_errors?({:error, _resp}), do: true
-      defp publish_errors?(_resp), do: false
+      defp extract_publish_errors(:ok), do: []
+      defp extract_publish_errors({:ok, result}) when is_tuple(result), do: extract_publish_errors(result)
+      defp extract_publish_errors({:ok, _}), do: []
+      defp extract_publish_errors({:error, errors}) when is_list(errors), do: errors
+      defp extract_publish_errors({:error, error}), do: [error]
+      defp extract_publish_errors({:exit, reason}), do: [reason]
+      defp extract_publish_errors(other), do: [other]
     end
   end
 end

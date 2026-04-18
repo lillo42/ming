@@ -52,5 +52,13 @@ defmodule Ming.CompositeRouterTest do
       resp = Ming.SimpleComposeRouter.publish(%Ming.ExampleCommand2{})
       assert resp == :ok
     end
+
+    test "concurrent composite publish aggregates errors" do
+      resp =
+        Ming.ConcurrentCompositeRouter.publish(%Ming.ExampleEvent1{value: "error"})
+
+      assert {:error, errors} = resp
+      assert :some_error in errors
+    end
   end
 end

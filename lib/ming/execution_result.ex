@@ -28,7 +28,7 @@ defmodule Ming.ExecutionResult do
 
   @type t :: %__MODULE__{
           events: list(struct()),
-          metadata: struct()
+          metadata: map()
         }
 
   @enforce_keys [:events, :metadata]

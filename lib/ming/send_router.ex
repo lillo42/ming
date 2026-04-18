@@ -304,11 +304,14 @@ defmodule Ming.SendRouter do
     :function,
     :before_execute,
     :timeout,
-    :middleware
+    :middleware,
+    :retry_attempts,
+    :returning
   ]
 
   defp parse_send_opts([{:to, handler} | opts], result) do
-    parse_send_opts(opts, [function: :execute, to: handler] ++ result)
+    result = Keyword.put_new(result, :function, :execute)
+    parse_send_opts(opts, Keyword.put(result, :to, handler))
   end
 
   defp parse_send_opts([{param, value} | opts], result) when param in @register_send_params do

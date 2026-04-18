@@ -144,5 +144,17 @@ defmodule Ming.RouteTest do
       resp = Ming.RaiseRouter.publish(%Ming.ExampleEvent1{value: "throwing"})
       assert {:error, [%ArgumentError{message: "invalid val: throwing"}]} == resp
     end
+
+    test "concurrent publish with error handlers" do
+      resp =
+        Ming.ConcurrentPublishRouter.publish(%Ming.ExampleEvent1{value: "error"})
+
+      assert resp == {:error, [:some_error]}
+    end
+
+    test "custom function is preserved in publish opts" do
+      resp = Ming.CustomFunctionRouter.publish(%Ming.ExampleCommand1{})
+      assert resp == :ok
+    end
   end
 end

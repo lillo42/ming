@@ -110,21 +110,30 @@ defmodule Ming.Dispatcher do
 
     start_time = telemetry_start(telemetry_metadata)
 
-    pipeline = before_dispatch(pipeline, payload)
+    try do
+      pipeline = before_dispatch(pipeline, payload)
 
-    # Stop command execution if pipeline has been halted
-    if Pipeline.halted?(pipeline) do
-      pipeline
-      |> after_failure(payload)
-      |> telemetry_stop(start_time, telemetry_metadata)
-      |> Pipeline.response()
-    else
-      context = to_execution_context(pipeline, payload)
+      # Stop command execution if pipeline has been halted
+      if Pipeline.halted?(pipeline) do
+        pipeline
+        |> after_failure(payload)
+        |> telemetry_stop(start_time, telemetry_metadata)
+        |> Pipeline.response()
+      else
+        context = to_execution_context(pipeline, payload)
 
-      pipeline
-      |> execute(payload, context)
-      |> telemetry_stop(start_time, telemetry_metadata)
-      |> Pipeline.response()
+        pipeline
+        |> execute(payload, context)
+        |> telemetry_stop(start_time, telemetry_metadata)
+        |> Pipeline.response()
+      end
+    rescue
+      error ->
+        Telemetry.stop([:ming, :application, :dispatch], start_time,
+          Map.put(telemetry_metadata, :error, error)
+        )
+
+        reraise error, __STACKTRACE__
     end
   end
 
@@ -166,7 +175,7 @@ defmodule Ming.Dispatcher do
 
   @doc false
   defp to_execution_context(%Pipeline{} = pipeline, %Payload{} = payload) do
-    %Pipeline{request: request, request_uuid: resquest_uuid, metadata: metadata} = pipeline
+    %Pipeline{request: request, request_uuid: request_uuid, metadata: metadata} = pipeline
 
     %Payload{
       correlation_id: correlation_id,
@@ -179,7 +188,7 @@ defmodule Ming.Dispatcher do
 
     %ExecutionContext{
       request: request,
-      causation_id: resquest_uuid,
+      causation_id: request_uuid,
       correlation_id: correlation_id,
       metadata: metadata,
       handler: handler_module,
@@ -210,19 +219,6 @@ defmodule Ming.Dispatcher do
   end
 
   @doc false
-  defp after_failure(
-         %Pipeline{response: {:error, error, reason}} = pipeline,
-         %Payload{} = payload
-       ) do
-    %Payload{middleware: middleware} = payload
-
-    pipeline
-    |> Pipeline.assign(:error, error)
-    |> Pipeline.assign(:error_reason, reason)
-    |> Pipeline.chain(:after_failure, middleware)
-  end
-
-  @doc false
   defp after_failure(%Pipeline{} = pipeline, %Payload{} = payload) do
     %Payload{middleware: middleware} = payload
 
@@ -231,12 +227,12 @@ defmodule Ming.Dispatcher do
 
   @doc false
   defp telemetry_start(telemetry_metadata) do
-    Telemetry.start([:commanded, :application, :dispatch], telemetry_metadata)
+    Telemetry.start([:ming, :application, :dispatch], telemetry_metadata)
   end
 
   @doc false
   defp telemetry_stop(%Pipeline{assigns: assigns} = pipeline, start_time, telemetry_metadata) do
-    event_prefix = [:commanded, :application, :dispatch]
+    event_prefix = [:ming, :application, :dispatch]
 
     case assigns do
       %{error: error} ->

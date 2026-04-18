@@ -112,7 +112,7 @@ defmodule Ming.ExecutionContext do
       :execution_result ->
         result = %Ming.ExecutionResult{
           events: events,
-          metadata: metadata
+          metadata: metadata || %{}
         }
 
         {:ok, result}
@@ -121,6 +121,9 @@ defmodule Ming.ExecutionContext do
         :ok
 
       nil ->
+        :ok
+
+      _ ->
         :ok
     end
   end
@@ -131,5 +134,9 @@ defmodule Ming.ExecutionContext do
 
   def format_reply({:error, error, _stacktrace}, _context) do
     {:error, error}
+  end
+
+  def format_reply(reply, _context) do
+    reply
   end
 end

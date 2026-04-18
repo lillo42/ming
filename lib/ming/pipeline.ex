@@ -24,7 +24,7 @@ defmodule Ming.Pipeline do
   where each middleware can transform the pipeline state, add metadata, or halt processing.
   """
 
-  @type t :: %{
+  @type t :: %__MODULE__{
           application: term() | nil,
           correlation_id: UUIDv7.t(),
           request: any(),
