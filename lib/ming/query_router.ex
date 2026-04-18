@@ -335,8 +335,11 @@ defmodule Ming.QueryRouter do
   ]
 
   defp parse_query_opts([{:to, handler} | opts], result) do
-    result = Keyword.put_new(result, :function, :execute)
-    parse_query_opts(opts, Keyword.put(result, :to, handler))
+    result =
+      Keyword.put_new(result, :function, :execute)
+      |> Keyword.put(:to, handler)
+
+    parse_query_opts(opts, result)
   end
 
   defp parse_query_opts([{param, value} | opts], result) when param in @register_query_params do

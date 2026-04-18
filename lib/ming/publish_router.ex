@@ -296,7 +296,10 @@ defmodule Ming.PublishRouter do
       defp do_publish(_event, _opts), do: :ok
 
       defp extract_publish_errors(:ok), do: []
-      defp extract_publish_errors({:ok, result}) when is_tuple(result), do: extract_publish_errors(result)
+
+      defp extract_publish_errors({:ok, result}) when is_tuple(result),
+        do: extract_publish_errors(result)
+
       defp extract_publish_errors({:ok, _}), do: []
       defp extract_publish_errors({:error, errors}) when is_list(errors), do: errors
       defp extract_publish_errors({:error, reason}), do: [reason]
@@ -372,8 +375,11 @@ defmodule Ming.PublishRouter do
   ]
 
   defp parse_publish_opts([{:to, handler} | opts], result) do
-    result = Keyword.put_new(result, :function, :execute)
-    parse_publish_opts(opts, Keyword.put(result, :to, handler))
+    result =
+      Keyword.put_new(result, :function, :execute)
+      |> Keyword.put(:to, handler)
+
+    parse_publish_opts(opts, result)
   end
 
   defp parse_publish_opts([{param, value} | opts], result)
