@@ -55,6 +55,22 @@ defmodule Ming.Middleware do
   passed as the second argument to each stage callback.
   """
 
+  @typedoc """
+  Type representing middleware options.
+
+  Options can be any Elixir term, including nested structures.
+  This flexibility allows middleware to accept arbitrary configuration data.
+
+  ## Examples
+
+      "binary string"
+      :atom_option
+      {MyModule, retry_attempts: 3}
+      [nested: [opts: :value]]
+      %{key => value}
+      nil
+
+  """
   @type opts() ::
           binary()
           | tuple()
@@ -66,6 +82,30 @@ defmodule Ming.Middleware do
           | MapSet.t()
           | nil
 
+  @doc """
+  Initialize middleware options.
+
+  This callback is called when middleware is registered in the pipeline.
+  It receives the options provided at registration time and returns
+  transformed options that will be passed to all stage callbacks.
+
+  ## Parameters
+
+  - `opts`: The options provided when middleware was registered. If registered
+    as a bare module, this will be `nil`.
+
+  ## Returns
+
+  - Transformed options to be passed to `before_dispatch/2`, `after_dispatch/2`,
+    and `after_failure/2`
+
+  ## Examples
+
+      def init(opts) do
+        Keyword.validate!(opts, [:timeout, :retries])
+      end
+
+  """
   @callback init(opts()) :: opts()
 
   @doc """

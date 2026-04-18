@@ -53,6 +53,11 @@ defmodule Ming.Dispatcher do
     - `:middleware` - List of middleware modules to execute during processing
     """
 
+    @typedoc """
+    The dispatcher payload struct type.
+
+    Encapsulates all information required to execute a command through the pipeline.
+    """
     @type t :: %__MODULE__{}
 
     defstruct [

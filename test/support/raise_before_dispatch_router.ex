@@ -6,8 +6,8 @@ defmodule Ming.RaiseBeforeDispatchRouter do
     max_concurrency: 2
 
   alias Ming.ExampleCommand1
-  alias Ming.ReturningOkHandler
   alias Ming.RaiseBeforeDispatchMiddleware
+  alias Ming.ReturningOkHandler
 
   middleware(RaiseBeforeDispatchMiddleware)
 

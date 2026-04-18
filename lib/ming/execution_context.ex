@@ -37,6 +37,24 @@ defmodule Ming.ExecutionContext do
     metadata: %{}
   ]
 
+  @typedoc """
+  The execution context struct type.
+
+  Encapsulates all information required to execute a command, including
+  the request, correlation data, handler configuration, and metadata.
+  """
+  @type t :: %__MODULE__{
+          request: any(),
+          causation_id: UUIDv7.t() | nil,
+          correlation_id: UUIDv7.t() | nil,
+          handler: module() | nil,
+          function: atom(),
+          before_execute: atom() | nil,
+          retry_attempts: non_neg_integer(),
+          returning: :events | :execution_result | false | nil,
+          metadata: map()
+        }
+
   @doc """
   Attempts to retry the execution by decrementing the retry attempts counter.
 

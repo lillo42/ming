@@ -3,8 +3,8 @@ defmodule Ming.CustomFunctionRouter do
 
   use Ming.PublishRouter, otp_app: :ming
 
-  alias Ming.ExampleCommand1
   alias Ming.CustomFunctionHandler
+  alias Ming.ExampleCommand1
 
   publish(ExampleCommand1, to: CustomFunctionHandler, function: :handle)
 end

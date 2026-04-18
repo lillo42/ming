@@ -24,6 +24,11 @@ defmodule Ming.Pipeline do
   where each middleware can transform the pipeline state, add metadata, or halt processing.
   """
 
+  @typedoc """
+  The pipeline struct type.
+
+  Represents the state of a message as it flows through middleware stages.
+  """
   @type t :: %__MODULE__{
           application: term() | nil,
           correlation_id: UUIDv7.t(),
