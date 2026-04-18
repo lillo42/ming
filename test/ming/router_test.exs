@@ -145,6 +145,14 @@ defmodule Ming.RouteTest do
       assert {:error, [%ArgumentError{message: "invalid val: throwing"}]} == resp
     end
 
+    test "a handler throwing" do
+      resp = Ming.ThrowRouter.publish(%Ming.ExampleCommand1{value: "thrown"})
+      assert {:error, ["thrown"]} == resp
+
+      resp = Ming.ThrowRouter.publish(%Ming.ExampleEvent1{value: "thrown"})
+      assert {:error, ["thrown", "thrown"]} == resp
+    end
+
     test "concurrent publish with error handlers" do
       resp =
         Ming.ConcurrentPublishRouter.publish(%Ming.ExampleEvent1{value: "error"})
@@ -155,6 +163,33 @@ defmodule Ming.RouteTest do
     test "custom function is preserved in publish opts" do
       resp = Ming.CustomFunctionRouter.publish(%Ming.ExampleCommand1{})
       assert resp == :ok
+    end
+
+    test "before_execute rejects command" do
+      resp = Ming.BeforeExecuteRouter.send(%Ming.ExampleCommand1{value: "reject"})
+      assert resp == {:error, :rejected}
+    end
+
+    test "before_execute allows command" do
+      resp = Ming.BeforeExecuteRouter.send(%Ming.ExampleCommand1{value: "ok"})
+      assert resp == :ok
+    end
+
+    test "returning :execution_result" do
+      resp = Ming.ExecutionResultRouter.send(%Ming.ExampleCommand1{}, returning: :execution_result)
+      assert {:ok, %Ming.ExecutionResult{events: [:some_reply], metadata: %{}}} = resp
+    end
+  end
+
+  describe "tracking middleware" do
+    test "after_dispatch is called on success" do
+      resp = Ming.TrackingRouter.send(%Ming.ExampleCommand1{})
+      assert resp == :ok
+    end
+
+    test "after_failure is called on error" do
+      resp = Ming.TrackingRouter.publish(%Ming.ExampleEvent1{value: "error"})
+      assert {:error, [:some_error]} = resp
     end
   end
 end

@@ -19,7 +19,7 @@ defmodule Ming do
   Ming follows a layered architecture:
 
   1. **Command Processor** (`Ming.CommandProcessor`) - Top-level command handling
-  2. **Composite Routers** (`Ming.CompositeRouter`) - Aggregate multiple routers
+  2. **Composite Routers** (`Ming.CompositeRouter`, `Ming.SendCompositeRouter`, `Ming.PublishCompositeRouter`, `Ming.QueryCompositeRouter`) - Aggregate multiple routers
   3. **Individual Routers** (`Ming.Router`) - Unified command, event, and query routing
   4. **Send/Publish/Query Routers** (`Ming.SendRouter`, `Ming.PublishRouter`, `Ming.QueryRouter`) - Specialized routing
   5. **Dispatcher** (`Ming.Dispatcher`) - Core dispatching mechanism
@@ -84,7 +84,6 @@ defmodule Ming do
   - `Ming.Middleware` - Middleware behavior definition
 
   ### Infrastructure
-  - `Ming.TaskSupervisor` - Task supervision for async operations
   - `Ming.Telemetry` - Telemetry and monitoring integration
 
   ## Configuration
@@ -97,12 +96,11 @@ defmodule Ming do
 
   ## Telemetry
   Ming emits telemetry events for monitoring:
-  - `[:ming, :command, :start]` - Command processing started
-  - `[:ming, :command, :stop]` - Command processing completed
-  - `[:ming, :command, :exception]` - Command processing error
-  - `[:ming, :event, :publish]` - Event publication
-  - `[:ming, :dispatch, :start]` - Dispatch started
-  - `[:ming, :dispatch, :stop]` - Dispatch completed
+  - `[:ming, :application, :dispatch, :start]` - Command/event dispatch started
+  - `[:ming, :application, :dispatch, :stop]` - Command/event dispatch completed
+  - `[:ming, :handler, :execute, :start]` - Handler execution started
+  - `[:ming, :handler, :execute, :stop]` - Handler execution completed
+  - `[:ming, :handler, :execute, :exception]` - Handler raised an exception
 
   ## Example
 

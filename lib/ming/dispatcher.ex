@@ -95,12 +95,10 @@ defmodule Ming.Dispatcher do
       }
 
       case Ming.Dispatcher.dispatch(payload) do
-        {:ok, events} -> 
+        {:ok, events} ->
           # Handle successful execution with events
-        {:error, reason} -> 
-
+        {:error, reason} ->
           # Handle execution failure
-
       end
   """
   @spec dispatch(payload :: Payload.t()) :: :ok | {:ok, any()} | {:error, any()}

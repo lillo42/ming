@@ -311,7 +311,7 @@ defmodule Ming.QueryRouter do
         Telemetry.stop(
           event_prefix,
           start_time,
-          Map.put(telemetry_metadata, :error, :unregistered_command)
+          Map.put(telemetry_metadata, :error, :unregistered_query)
         )
 
         {:error, :unregistered_query}

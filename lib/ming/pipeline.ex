@@ -173,8 +173,11 @@ defmodule Ming.Pipeline do
 
   Processing stops if:
   - The middleware list is empty
-  - The pipeline is already halted
+  - The pipeline is already halted (only for `:before_dispatch` and `:after_dispatch`)
   - All middleware has been processed
+
+  Note: `:after_failure` middleware always runs even when the pipeline is halted,
+  matching the behavior of Commanded.
 
   ## Parameters
   - `pipeline`: The current `Ming.Pipeline.t()`

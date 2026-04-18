@@ -27,7 +27,7 @@ defmodule Ming.Handler do
 
   telemetry_event(%{
     event: [:ming, :handler, :execute, :exception],
-    description: "Emitted when an handler raises an exception",
+    description: "Emitted when a handler raises an exception or throws",
     measurements: "%{duration: non_neg_integer()}",
     metadata: """
     %{application: Ming.CommandProcessor.t(),
@@ -63,8 +63,8 @@ defmodule Ming.Handler do
 
   ## Return values
 
-  Returns `{:ok, response}` on success, or `{:error, error}`
-  on failure.
+  Returns `{:ok, response}` on success, `{:error, error}` on failure,
+  or `{:error, error, stacktrace}` when the handler raises an exception.
 
     - `response` - response produced by the handler, can be an empty list.
   """
@@ -128,6 +128,10 @@ defmodule Ming.Handler do
       Logger.error(Exception.format(:error, error, stacktrace))
 
       {:error, error, stacktrace}
+  catch
+    kind, reason ->
+      Logger.error("handler #{kind}: #{inspect(reason)}")
+      {:error, reason}
   end
 
   defp before_execute_command(%ExecutionContext{before_execute: nil}), do: :ok

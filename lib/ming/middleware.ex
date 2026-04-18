@@ -44,6 +44,15 @@ defmodule Ming.Middleware do
 
   Add middleware modules to your Ming pipeline configuration to enable them.
   Middleware are executed in the order they are configured.
+
+  Middleware can be registered as a bare module or as a `{module, opts}` tuple:
+
+      middleware MyMiddleware
+      middleware {MyMiddleware, retry_attempts: 3}
+
+  When a tuple is used, `init/1` is called with the provided opts. When a bare
+  module is used, `init/1` is called with `nil`. The returned value is then
+  passed as the second argument to each stage callback.
   """
 
   @type opts() ::
