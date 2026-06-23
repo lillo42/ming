@@ -1,5 +1,15 @@
 defmodule Ming.CommandProcessor do
-  defmacro __using__(opts) do
+  @moduledoc """
+  Macro-based command processor that aggregates multiple routers.
+
+  It builds routing tables at compile time and dispatches `send/2` and
+  `publish/2` calls to the correct router module.
+  """
+
+  @doc """
+  Injects router aggregation macros.
+  """
+  defmacro __using__(_opts) do
     quote do
       import unquote(__MODULE__)
 
@@ -9,6 +19,9 @@ defmodule Ming.CommandProcessor do
     end
   end
 
+  @doc """
+  Registers a router and all its routing keys into the processor.
+  """
   defmacro router(router) do
     for routing_key <- router.__register_routing_keys__() do
       quote generated: true do
@@ -17,6 +30,7 @@ defmodule Ming.CommandProcessor do
     end
   end
 
+  @doc false
   defmacro __before_compile__(_env) do
     quote generated: true do
       @routing_key_by_module Enum.group_by(@routers, &elem(&1, 0), &elem(&1, 1))
@@ -31,7 +45,7 @@ defmodule Ming.CommandProcessor do
         do: do_send(command.__struct__, command, timeout: timeout)
 
       def send(command, routing_key) when is_atom(routing_key),
-        do: do_send(router_key, command, [])
+        do: do_send(routing_key, command, [])
 
       def send(command, opts),
         do: do_send(resolve_routing_key(opts, command), command, opts)
@@ -43,11 +57,11 @@ defmodule Ming.CommandProcessor do
 
           defp do_send(@routing_key, command, opts), do: @router.send(command, opts)
         else
-          defp do_send(@routing_key, _command, _opts), do: {:error, :more_than_one_handler_found}
+          defp do_send(@routing_key, _request, _opts), do: {:error, :more_than_one_handler_found}
         end
       end
 
-      defp do_send(_routing_key, _command, _opts), do: {:error, :unregistered_command}
+      defp do_send(_routing_key, _request, _opts), do: {:error, :unregistered_command}
 
       @doc false
       def publish(event, opts \\ [])
@@ -55,11 +69,11 @@ defmodule Ming.CommandProcessor do
       def publish(event, :infinity) when is_struct(event),
         do: do_publish(event.__struct__, event, timeout: :infinity)
 
-      def publish(event, timeout) when is_struct(command) and is_integer(timeout),
+      def publish(event, timeout) when is_struct(event) and is_integer(timeout),
         do: do_publish(event.__struct__, event, timeout: timeout)
 
       def publish(event, routing_key) when is_atom(routing_key),
-        do: do_publish(router_key, event, [])
+        do: do_publish(routing_key, event, [])
 
       def publish(event, opts),
         do: do_publish(resolve_routing_key(opts, event), event, opts)
@@ -69,13 +83,13 @@ defmodule Ming.CommandProcessor do
         if Enum.count(routers) == 1 do
           @router Enum.at(routers, 0)
 
-          defp do_publish(@routing_key, event, opts), do: @router.publish(command, opts)
+          defp do_publish(@routing_key, event, opts), do: @router.publish(event, opts)
         else
           @routers routers
 
           defp do_publish(@routing_key, event, opts) do
-            case Keyword.get(opts, :execute_mode, :sequencial) do
-              :sequencial ->
+            case Keyword.get(opts, :execute_mode, :sequential) do
+              :sequential ->
                 Enum.map(
                   @routers,
                   & &1.publish(@routing_key, event, opts)
@@ -98,7 +112,7 @@ defmodule Ming.CommandProcessor do
         end
       end
 
-      defp do_publish(_routing_key, _command, _opts), do: {:error, :unregistered_command}
+      defp do_publish(_routing_key, _request, _opts), do: {:error, :unregistered_command}
 
       defp resolve_routing_key(opts, request) when is_struct(request),
         do: Keyword.get(opts, :routing_key, request.__struct__)

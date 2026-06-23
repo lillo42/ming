@@ -1,4 +1,14 @@
 defmodule Ming.Router do
+  @moduledoc """
+  Macro-based router for request registration and dispatch.
+
+  A router maps one or more routing keys to handlers and middleware, then
+  generates `send/3` and `publish/3` functions for runtime execution.
+  """
+
+  @doc """
+  Injects router registration macros and default options.
+  """
   defmacro __using__(opts) do
     metadata = Keyword.get(opts, :metadata, %{})
     timeout = Keyword.get(opts, :timeout, :infinity)
@@ -18,23 +28,30 @@ defmodule Ming.Router do
     end
   end
 
+  @doc """
+  Registers a middleware module to run for this router.
+  """
   defmacro middleware(middleware) do
     quote generated: true do
       @registered_middlewares unquote(middleware)
     end
   end
 
-  defmacro register(router_key_or_keys, opts) do
-    for router_key <- List.wrap(router_key_or_keys) do
+  @doc """
+  Registers one or many routing keys with handler options.
+  """
+  defmacro register(routing_key_or_keys, opts) do
+    for routing_key <- List.wrap(routing_key_or_keys) do
       quote generated: true do
         @registered {
-          unquote(router_key),
+          unquote(routing_key),
           Keyword.merge(@default_opts, unquote(opts))
         }
       end
     end
   end
 
+  @doc false
   defmacro __before_compile__(_env) do
     quote generated: true do
       @register_routing_keys @registered
@@ -55,17 +72,17 @@ defmodule Ming.Router do
           @current_opts Enum.at(opts, 0)
 
           defp do_send(@routing_key, command, opts) do
-            do_dispatcher(@routing_key, command, current_opts, opts)
+            do_dispatcher(@routing_key, command, @current_opts, opts)
           end
         else
           defp do_send(@routing_key, _command, _opts), do: {:error, :more_than_one_handler_found}
         end
       end
 
-      defp do_send(_routing_key, _command, _opts), do: {:error, :unregistered_command}
+      defp do_send(_routing_key, _request, _opts), do: {:error, :unregistered_command}
 
       @doc false
-      def publish(routing_key, event, opts \\ []), do: do_publish(router_key, event, opts)
+      def publish(routing_key, event, opts \\ []), do: do_publish(routing_key, event, opts)
 
       for {routing_key, opts} <- @register_by_routing_key do
         @routing_key routing_key
@@ -74,7 +91,7 @@ defmodule Ming.Router do
           @current_opts Enum.at(opts, 0)
 
           defp do_publish(@routing_key, event, opts) do
-            do_dispatcher(@routing_key, event, current_opts, opts)
+            do_dispatcher(@routing_key, event, @current_opts, opts)
           end
         else
           @all_opts opts
@@ -90,7 +107,7 @@ defmodule Ming.Router do
         end
       end
 
-      defp do_publish(_routing_key, _command, _opts), do: {:error, :unregistered_command}
+      defp do_publish(_routing_key, _request, _opts), do: {:error, :unregistered_command}
 
       defp do_dispatcher(routing_key, request, system_opts, user_opts) do
         alias Ming.Context
@@ -100,12 +117,14 @@ defmodule Ming.Router do
         middleware = Keyword.get(system_opts, :middleware, [])
 
         opts = Keyword.merge(system_opts, user_opts)
-        correlation_id = Keyword.get(opts, :correlation_id)
+        id = Keyword.get(opts, :id, UUIDv7.generate())
+        correlation_id = Keyword.get(opts, :correlation_id, UUIDv7.generate())
         metadata = Keyword.get(opts, :metadata, %{})
         timeout = Keyword.get(opts, :timeout, :infinity)
 
         context = %Context{
           assigns: %{},
+          id: id,
           correlation_id: correlation_id,
           handler: handler,
           metadata: metadata,

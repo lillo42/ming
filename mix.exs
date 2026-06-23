@@ -14,7 +14,7 @@ defmodule Ming.MixProject do
       consolidate_protocols: Mix.env() != :test,
 
       # Hex
-      description: "A toolkit for building messagin apps for Elixir",
+      description: "A toolkit for building messaging apps for Elixir",
       package: package(),
 
       # Docs

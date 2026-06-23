@@ -1,8 +1,17 @@
 defmodule Ming.Middleware.CallHandler do
+  @moduledoc """
+  Terminal middleware responsible for invoking the configured handler.
+
+  It normalizes handler return values into `Ming.Context.response`.
+  """
+
   alias Ming.Context
 
   @behaviour Ming.Middleware
 
+  @doc """
+  Calls the configured handler and maps its result into context response.
+  """
   def before_handle(
         %Context{
           handler: handler,
@@ -36,5 +45,8 @@ defmodule Ming.Middleware.CallHandler do
     end
   end
 
+  @doc """
+  No-op after stage for handler invocation middleware.
+  """
   def after_handle(context), do: context
 end
