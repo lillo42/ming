@@ -1,194 +1,129 @@
 defmodule Ming.Router do
-  @moduledoc """
-  Provides a unified routing interface that combines both command sending and event publishing capabilities.
-
-  This module serves as a convenience wrapper that combines `Ming.SendRouter`, `Ming.PublishRouter`, and `Ming.QueryRouter`
-  functionality into a single module. It allows you to define command, event, and query routing in one place,
-  with shared configuration and middleware.
-
-  ## Key Features
-  - Unified interface for command sending, event publishing, and query execution
-  - Shared middleware configuration for command, event, and query pipelines
-  - Combined command, event, and query registration
-  - Consistent configuration across all routing types
-  - Aggregate request registration for commands, events, and queries
-
-  ## Usage
-
-  Use this module to create a comprehensive router that handles commands, events, and queries:
-
-      defmodule MyApp.Router do
-        use Ming.Router,
-          ming: :my_app,
-          timeout: 10_000,
-          retry_attempts: 5,
-          max_concurrency: 8,
-          concurrency_timeout: 30_000
-
-        # Middleware applied to both commands and events
-        middleware MyApp.AuthMiddleware
-        middleware MyApp.LoggingMiddleware
-        middleware MyApp.MetricsMiddleware
-
-        # Register commands (sent to single handler)
-        dispatch CreateUser, to: UserHandler
-        dispatch UpdateUser, to: UserHandler
-
-        # Register events (published to multiple handlers)  
-        dispatch OrderCreated, to: OrderProjection
-        dispatch OrderCreated, to: EmailNotifier
-        dispatch OrderCreated, to: AnalyticsService
-
-      end
-
-  Then you can use the same router for both commands and events:
-
-      # Send a command
-      MyApp.Router.send(%CreateUser{name: "John", email: "john@example.com"})
-
-      # Publish an event
-      MyApp.Router.publish(%OrderCreated{order_id: "123", amount: 100.0})
-  """
-  require Ming.QueryRouter
-
-  @doc """
-  Sets up the combined Router module with configuration options.
-
-  This macro is invoked when using `Ming.Router` in another module.
-  It sets up SendRouter, PublishRouter, and QueryRouter functionality with shared configuration.
-
-  ## Options
-  - `:ming` - The OTP application name (required)
-  - `:timeout` - Default timeout for both command and event processing in milliseconds (default: `5000`)
-  - `:retry` - Default number of retry attempts for failed operations (default: `10`)
-  - `:concurrency_timeout` - Timeout for concurrent event processing (default: `30000`)
-  - `:max_concurrency` - Maximum number of concurrent event handlers (default: `1`)
-  - `:task_supervisor` - Task supervisor for async operations (default: `Ming.TaskSupervisor`)
-
-  ## Examples
-      use Ming.Router,
-        ming: :my_app,
-        timeout: 15_000,
-        retry: 3,
-        max_concurrency: 5,
-        concurrency_timeout: 45_000
-  """
   defmacro __using__(opts) do
-    app = Keyword.get(opts, :ming)
-    timeout = Keyword.get(opts, :timeout, 5_000)
-    retry_attempts = Keyword.get(opts, :retry, 10)
-    concurrency_timeout = Keyword.get(opts, :concurrency_timeout, 30_000)
-    max_concurrency = Keyword.get(opts, :max_concurrency, 1)
-    task_supervisor = Keyword.get(opts, :task_supervisor, Ming.TaskSupervisor)
+    metadata = Keyword.get(opts, :metadata, %{})
+    timeout = Keyword.get(opts, :timeout, :infinity)
 
     quote do
       import unquote(__MODULE__)
 
       @before_compile unquote(__MODULE__)
 
-      use Ming.SendRouter,
-        otp_app: unquote(app),
-        timeout: unquote(timeout),
-        retry_attempts: unquote(retry_attempts)
+      Module.register_attribute(__MODULE__, :registered, accumulate: true)
+      Module.register_attribute(__MODULE__, :registered_middlewares, accumulate: true)
 
-      use Ming.PublishRouter,
-        otp_app: unquote(app),
-        timeout: unquote(timeout),
-        retry_attempts: unquote(retry_attempts),
-        concurrency_timeout: unquote(concurrency_timeout),
-        max_concurrency: unquote(max_concurrency),
-        task_supervisor: unquote(task_supervisor)
-
-      use Ming.QueryRouter,
-        otp_app: unquote(app),
-        timeout: unquote(timeout),
-        retry_attempts: unquote(retry_attempts)
+      @default_opts [
+        metadata: unquote(metadata),
+        timeout: unquote(timeout)
+      ]
     end
   end
 
-  @doc """
-  Registers middleware for both command and event processing pipelines.
-
-  This macro applies the specified middleware to the SendRouter, PublishRouter, and QueryRouter,
-  ensuring consistent cross-cutting concerns across command, event, and query processing.
-
-  ## Parameters
-  - `middleware_module` - The middleware module to register for both pipelines
-
-  ## Examples
-      middleware MyApp.AuthMiddleware
-      middleware MyApp.LoggingMiddleware
-      middleware MyApp.ValidationMiddleware
-
-  ## Note
-  The middleware module must implement both the `Ming.Middleware` behaviour for command
-  processing and the appropriate interfaces for event processing.
-  """
-  defmacro middleware(middleware_module) do
-    quote do
-      send_middleware(unquote(middleware_module))
-      publish_middleware(unquote(middleware_module))
-      query_middleware(unquote(middleware_module))
+  defmacro middleware(middleware) do
+    quote generated: true do
+      @registered_middlewares unquote(middleware)
     end
   end
 
-  @doc """
-  Registers a request for both command sending, event publishing and query execution.
-
-  This macro registers the specified request module with the SendRouter, PublishRouter,
-  and QueryRouter, allowing it to be used for command execution, event publication, and query execution.
-
-  ## Parameters
-  - `request_module_or_modules` - A single request module or list of request modules
-  - `opts` - Configuration options for command, event, and query dispatch
-
-  ## Options
-  - `:to` - The handler module that will process the request (required)
-  - `:function` - The handler function to call (default: `:execute`)
-  - `:before_execute` - Optional function to prepare the request before execution
-  - `:timeout` - Timeout for this specific request (overrides default)
-  - `:metadata` - Additional metadata for the execution context
-  - `:retry_attempts` - Number of retry attempts for this request
-  - `:returning` - Specifies what should be returned from execution
-
-  ## Examples
-      # Single request to single handler (command behavior)
-      dispatch CreateUser, to: UserHandler
-
-      # Single request to multiple handlers (event behavior)
-      dispatch OrderCreated, to: OrderProjection
-      dispatch OrderCreated, to: EmailNotifier
-
-      # Multiple requests to same handler
-      dispatch [CreateUser, UpdateUser, DeleteUser], to: UserHandler
-
-      # With custom options
-      dispatch ProcessPayment,
-        to: PaymentHandler,
-        function: :handle_payment,
-        timeout: 30_000,
-        metadata: %{priority: "high"}
-  """
-  defmacro dispatch(request_module_or_modules, opts) do
-    quote do
-      Ming.SendRouter.send(unquote(request_module_or_modules), unquote(opts))
-      Ming.PublishRouter.publish(unquote(request_module_or_modules), unquote(opts))
-      Ming.QueryRouter.query(unquote(request_module_or_modules), unquote(opts))
+  defmacro register(router_key_or_keys, opts) do
+    for router_key <- List.wrap(router_key_or_keys) do
+      quote generated: true do
+        @registered {
+          unquote(router_key),
+          Keyword.merge(@default_opts, unquote(opts))
+        }
+      end
     end
   end
 
-  @doc false
   defmacro __before_compile__(_env) do
     quote generated: true do
-      @doc false
-      def __registered_requests__ do
-        requests =
-          __registered_send_requests__() ++
-            __registered_publish_requests__() ++
-            __registered_query_requests__()
+      @register_routing_keys @registered
+                             |> Enum.map(&elem(&1, 0))
+                             |> Enum.uniq()
 
-        Enum.uniq(requests)
+      @register_by_routing_key Enum.group_by(@registered, &elem(&1, 0), &elem(&1, 1))
+
+      def __register_routing_keys__, do: @register_routing_keys
+
+      @doc false
+      def send(routing_key, command, opts \\ []), do: do_send(routing_key, command, opts)
+
+      for {routing_key, opts} <- @register_by_routing_key do
+        @routing_key routing_key
+
+        if Enum.count(opts) == 1 do
+          @current_opts Enum.at(opts, 0)
+
+          defp do_send(@routing_key, command, opts) do
+            do_dispatcher(@routing_key, command, current_opts, opts)
+          end
+        else
+          defp do_send(@routing_key, _command, _opts), do: {:error, :more_than_one_handler_found}
+        end
       end
+
+      defp do_send(_routing_key, _command, _opts), do: {:error, :unregistered_command}
+
+      @doc false
+      def publish(routing_key, event, opts \\ []), do: do_publish(router_key, event, opts)
+
+      for {routing_key, opts} <- @register_by_routing_key do
+        @routing_key routing_key
+
+        if Enum.count(opts) == 1 do
+          @current_opts Enum.at(opts, 0)
+
+          defp do_publish(@routing_key, event, opts) do
+            do_dispatcher(@routing_key, event, current_opts, opts)
+          end
+        else
+          @all_opts opts
+
+          defp do_publish(@routing_key, event, opts) do
+            # I'm expecting only one per router
+
+            Enum.map(
+              @all_opts,
+              &do_dispatcher(@routing_key, event, &1, opts)
+            )
+          end
+        end
+      end
+
+      defp do_publish(_routing_key, _command, _opts), do: {:error, :unregistered_command}
+
+      defp do_dispatcher(routing_key, request, system_opts, user_opts) do
+        alias Ming.Context
+        alias Ming.Dispatcher
+
+        handler = Keyword.fetch!(system_opts, :handler)
+        middleware = Keyword.get(system_opts, :middleware, [])
+
+        opts = Keyword.merge(system_opts, user_opts)
+        correlation_id = Keyword.get(opts, :correlation_id)
+        metadata = Keyword.get(opts, :metadata, %{})
+        timeout = Keyword.get(opts, :timeout, :infinity)
+
+        context = %Context{
+          assigns: %{},
+          correlation_id: correlation_id,
+          handler: handler,
+          metadata: metadata,
+          middlewares: middleware ++ [Ming.Middleware.CallHandler],
+          request: request,
+          routing_key: routing_key,
+          timestamp: DateTime.utc_now(),
+          timeout: timeout
+        }
+
+        Dispatcher.dispatch(context)
+        |> Context.response()
+      end
+
+      defp resolve_routing_key(opts, request) when is_struct(request),
+        do: Keyword.get(opts, :routing_key, request.__struct__)
+
+      defp resolve_routing_key(opts, request), do: Keyword.fetch(opts, :routing_key)
     end
   end
 end

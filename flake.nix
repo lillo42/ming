@@ -20,8 +20,8 @@
       {
         devShells.default = pkgs.mkShell {
           packages = [
-            pkgs.beamMinimal28Packages.elixir_1_19
-            pkgs.beamMinimal28Packages.elixir-ls
+            pkgs.beam28Packages.elixir_1_20
+            pkgs.beam28Packages.expert
           ];
         };
       }
