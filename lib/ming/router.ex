@@ -10,7 +10,7 @@ defmodule Ming.Router do
   Injects router registration macros and default options.
   """
   defmacro __using__(opts) do
-    metadata = Keyword.get(opts, :metadata, %{})
+    metadata = Keyword.get(opts, :metadata, %{}) |> Macro.escape()
     timeout = Keyword.get(opts, :timeout, :infinity)
 
     quote do
@@ -52,61 +52,62 @@ defmodule Ming.Router do
   end
 
   @doc false
-  defmacro __before_compile__(_env) do
+  defmacro __before_compile__(env) do
+    registered = Module.get_attribute(env.module, :registered) || []
+    register_routing_keys = Enum.map(registered, &elem(&1, 0)) |> Enum.uniq()
+    register_by_routing_key = Enum.group_by(registered, &elem(&1, 0), &elem(&1, 1))
+
+    send_clauses =
+      for {routing_key, opts_list} <- register_by_routing_key do
+        if Enum.count(opts_list) == 1 do
+          current_opts = Enum.at(opts_list, 0)
+          quote do
+            defp do_send(unquote(routing_key), command, opts) do
+              do_dispatcher(unquote(routing_key), command, unquote(Macro.escape(current_opts)), opts)
+            end
+          end
+        else
+          quote do
+            defp do_send(unquote(routing_key), _command, _opts), do: {:error, :more_than_one_handler_found}
+          end
+        end
+      end
+
+    publish_clauses =
+      for {routing_key, opts_list} <- register_by_routing_key do
+        if Enum.count(opts_list) == 1 do
+          current_opts = Enum.at(opts_list, 0)
+          quote do
+            defp do_publish(unquote(routing_key), event, opts) do
+              do_dispatcher(unquote(routing_key), event, unquote(Macro.escape(current_opts)), opts)
+            end
+          end
+        else
+          quote do
+            defp do_publish(unquote(routing_key), event, opts) do
+              all_opts = unquote(Macro.escape(opts_list))
+              Enum.map(
+                all_opts,
+                &do_dispatcher(unquote(routing_key), event, &1, opts)
+              )
+            end
+          end
+        end
+      end
+
     quote generated: true do
-      @register_routing_keys @registered
-                             |> Enum.map(&elem(&1, 0))
-                             |> Enum.uniq()
-
-      @register_by_routing_key Enum.group_by(@registered, &elem(&1, 0), &elem(&1, 1))
-
-      def __register_routing_keys__, do: @register_routing_keys
+      def __register_routing_keys__, do: unquote(register_routing_keys)
 
       @doc false
       def send(routing_key, command, opts \\ []), do: do_send(routing_key, command, opts)
 
-      for {routing_key, opts} <- @register_by_routing_key do
-        @routing_key routing_key
-
-        if Enum.count(opts) == 1 do
-          @current_opts Enum.at(opts, 0)
-
-          defp do_send(@routing_key, command, opts) do
-            do_dispatcher(@routing_key, command, @current_opts, opts)
-          end
-        else
-          defp do_send(@routing_key, _command, _opts), do: {:error, :more_than_one_handler_found}
-        end
-      end
-
+      unquote(send_clauses)
       defp do_send(_routing_key, _request, _opts), do: {:error, :unregistered_command}
 
       @doc false
       def publish(routing_key, event, opts \\ []), do: do_publish(routing_key, event, opts)
 
-      for {routing_key, opts} <- @register_by_routing_key do
-        @routing_key routing_key
-
-        if Enum.count(opts) == 1 do
-          @current_opts Enum.at(opts, 0)
-
-          defp do_publish(@routing_key, event, opts) do
-            do_dispatcher(@routing_key, event, @current_opts, opts)
-          end
-        else
-          @all_opts opts
-
-          defp do_publish(@routing_key, event, opts) do
-            # I'm expecting only one per router
-
-            Enum.map(
-              @all_opts,
-              &do_dispatcher(@routing_key, event, &1, opts)
-            )
-          end
-        end
-      end
-
+      unquote(publish_clauses)
       defp do_publish(_routing_key, _request, _opts), do: {:error, :unregistered_command}
 
       defp do_dispatcher(routing_key, request, system_opts, user_opts) do
@@ -114,7 +115,7 @@ defmodule Ming.Router do
         alias Ming.Dispatcher
 
         handler = Keyword.fetch!(system_opts, :handler)
-        middleware = Keyword.get(system_opts, :middleware, [])
+        middleware = Keyword.get(system_opts, :middleware, []) ++ @registered_middlewares
 
         opts = Keyword.merge(system_opts, user_opts)
         id = Keyword.get(opts, :id, UUIDv7.generate())
@@ -142,7 +143,7 @@ defmodule Ming.Router do
       defp resolve_routing_key(opts, request) when is_struct(request),
         do: Keyword.get(opts, :routing_key, request.__struct__)
 
-      defp resolve_routing_key(opts, request), do: Keyword.fetch(opts, :routing_key)
+      defp resolve_routing_key(opts, request), do: Keyword.fetch!(opts, :routing_key)
     end
   end
 end

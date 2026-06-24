@@ -4,6 +4,22 @@ defmodule Ming.Dispatcher do
 
   When a numeric timeout is configured, dispatch runs in a task and is bounded
   by that timeout. Otherwise it runs in-process.
+
+  ## Telemetry
+
+  The dispatcher emits the following telemetry events using `:telemetry.span/3`:
+
+  * `[:ming, :dispatch, :start]` - Executed before the dispatch pipeline starts.
+  * `[:ming, :dispatch, :stop]` - Executed after the pipeline completes successfully.
+  * `[:ming, :dispatch, :exception]` - Executed when the pipeline raises an exception.
+
+  All events receive the following metadata:
+  * `:handler` - The module handling the request
+  * `:pid` - The PID of the process executing the pipeline
+  * `:request_id` - The unique ID of the request
+  * `:request_correlation_id` - The correlation ID of the request
+  * `:routing_key` - The routing key used
+  * `:timeout` - The configured timeout
   """
 
   require Logger
