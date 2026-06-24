@@ -70,6 +70,7 @@ defmodule Ming.CommandProcessor do
                 execute_dispatch_strategy(
                   Keyword.get(opts, :dispatch_strategy, :sequential),
                   unquote(routers_list),
+                  unquote(routing_key),
                   event,
                   opts
                 )
