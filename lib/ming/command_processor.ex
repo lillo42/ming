@@ -24,6 +24,7 @@ defmodule Ming.CommandProcessor do
   """
   defmacro router(router_ast) do
     router = Macro.expand(router_ast, __CALLER__)
+
     for routing_key <- router.__register_routing_keys__() do
       quote generated: true do
         @routers {unquote(routing_key), unquote(router)}
@@ -40,6 +41,7 @@ defmodule Ming.CommandProcessor do
       for {routing_key, routers_list} <- routing_key_by_module do
         if Enum.count(routers_list) == 1 do
           router = Enum.at(routers_list, 0)
+
           quote do
             defp do_send(unquote(routing_key), command, opts),
               do: unquote(router).send(unquote(routing_key), command, opts)
@@ -56,6 +58,7 @@ defmodule Ming.CommandProcessor do
       for {routing_key, routers_list} <- routing_key_by_module do
         if Enum.count(routers_list) == 1 do
           router = Enum.at(routers_list, 0)
+
           quote do
             defp do_publish(unquote(routing_key), event, opts),
               do: unquote(router).publish(unquote(routing_key), event, opts)
@@ -71,6 +74,8 @@ defmodule Ming.CommandProcessor do
 
                 :parallel ->
                   Task.async_stream(routers, & &1.publish(unquote(routing_key), event, opts))
+                  |> Stream.map(&extract_stream_resp(&1))
+                  |> Enum.to_list()
 
                 {:parallel, async_opts} ->
                   Task.async_stream(
@@ -78,6 +83,8 @@ defmodule Ming.CommandProcessor do
                     & &1.publish(unquote(routing_key), event, opts),
                     async_opts
                   )
+                  |> Stream.map(&extract_stream_resp(&1))
+                  |> Enum.to_list()
               end
             end
           end
@@ -125,6 +132,9 @@ defmodule Ming.CommandProcessor do
         do: Keyword.get(opts, :routing_key, request.__struct__)
 
       defp resolve_routing_key(opts, request), do: Keyword.fetch!(opts, :routing_key)
+
+      defp extract_stream_resp({:ok, res}), do: res
+      defp extract_stream_resp({:exit, reason}), do: {:error, reason}
     end
   end
 end

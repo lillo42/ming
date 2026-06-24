@@ -86,10 +86,9 @@ defmodule Ming.CommandProcessorTest do
     end
 
     test "publishes event in parallel" do
-      # Should return stream results like [{:ok, {:ok, 99}}, {:ok, {:ok, 99}}]
-      results = MyProcessor.publish(%EventOne{val: 99}, execute_mode: :parallel) |> Enum.to_list()
+      results = MyProcessor.publish(%EventOne{val: 99}, execute_mode: :parallel)
       assert length(results) == 2
-      assert {:ok, {:ok, 99}} in results
+      assert {:ok, 99} in results
     end
   end
 end
