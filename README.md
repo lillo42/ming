@@ -73,7 +73,10 @@ You can send commands directly to a router.
 # Send expects a single handler to process the command
 command = %CreateUser{name: "John", email: "john@example.com"}
 
-%Ming.Context{response: :ok} = MyApp.UserRouter.send(command)
+:ok = MyApp.UserRouter.send(command)
+
+# You can also pass send_opts, such as a custom timeout or correlation_id
+:ok = MyApp.UserRouter.send(command, timeout: 5000)
 ```
 
 Events can be published to multiple handlers registered to the same struct.
@@ -88,6 +91,9 @@ end
 
 # Publish executes all registered handlers
 MyApp.EventRouter.publish(%UserCreated{id: 123})
+
+# Publish in parallel executes all registered handlers concurrently
+MyApp.EventRouter.publish(%UserCreated{id: 123}, dispatch_strategy: :parallel)
 ```
 
 ### 4. Aggregating Routers with CommandProcessor
@@ -104,6 +110,9 @@ end
 
 # The processor automatically routes to UserRouter based on the struct
 MyApp.CommandProcessor.send(%CreateUser{name: "Jane"})
+
+# Similarly, publish supports passing options like `dispatch_strategy`
+MyApp.CommandProcessor.publish(%UserCreated{id: 123}, dispatch_strategy: :parallel)
 ```
 
 ## Middleware Pipeline

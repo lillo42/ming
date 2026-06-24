@@ -68,7 +68,7 @@ defmodule Ming.CommandProcessor do
             defp do_publish(unquote(routing_key), event, opts) do
               routers = unquote(routers_list)
 
-              case Keyword.get(opts, :execute_mode, :sequential) do
+              case Keyword.get(opts, :dispatch_strategy, :sequential) do
                 :sequential ->
                   Enum.map(routers, & &1.publish(unquote(routing_key), event, opts))
 
@@ -92,7 +92,10 @@ defmodule Ming.CommandProcessor do
       end
 
     quote generated: true do
-      @doc false
+      @doc """
+      Routes a command to the corresponding router for execution.
+      """
+      @spec send(any(), keyword(Ming.send_opts()) | timeout() | Ming.routing_key()) :: Ming.resp()
       def send(command, opts \\ [])
 
       def send(command, :infinity) when is_struct(command),
@@ -110,7 +113,11 @@ defmodule Ming.CommandProcessor do
       unquote(send_clauses)
       defp do_send(_routing_key, _request, _opts), do: {:error, :unregistered_command}
 
-      @doc false
+      @doc """
+      Routes an event to all corresponding routers for execution.
+      """
+      @spec publish(any(), keyword(Ming.publish_opts()) | timeout() | Ming.routing_key()) ::
+              Ming.resp() | [Ming.resp()]
       def publish(event, opts \\ [])
 
       def publish(event, :infinity) when is_struct(event),

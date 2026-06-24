@@ -110,15 +110,25 @@ defmodule Ming.Router do
       end
 
     quote generated: true do
+      @doc """
+      Returns a list of all registered routing keys.
+      """
+      @spec __register_routing_keys__() :: [Ming.routing_key()]
       def __register_routing_keys__, do: unquote(register_routing_keys)
 
-      @doc false
+      @doc """
+      Sends a command to the handler registered for the given `routing_key`.
+      """
+      @spec send(Ming.routing_key(), any(), keyword(Ming.send_opts())) :: Ming.resp()
       def send(routing_key, command, opts \\ []), do: do_send(routing_key, command, opts)
 
       unquote(send_clauses)
       defp do_send(_routing_key, _request, _opts), do: {:error, :unregistered_command}
 
-      @doc false
+      @doc """
+      Publishes an event to all handlers registered for the given `routing_key`.
+      """
+      @spec publish(Ming.routing_key(), any(), keyword(Ming.publish_opts())) :: Ming.resp() | [Ming.resp()]
       def publish(routing_key, event, opts \\ []), do: do_publish(routing_key, event, opts)
 
       unquote(publish_clauses)

@@ -10,4 +10,36 @@ defmodule Ming do
   Common response shape expected by handlers and dispatch pipeline.
   """
   @type resp :: :ok | {:ok, any()} | {:error, any()}
+
+  @typedoc """
+  Represents a routing key used to map messages to their respective handlers.
+  """
+  @type routing_key :: atom()
+
+  @typedoc """
+  Represents a unique identifier, often a UUIDv7, string, or binary.
+  """
+  @type id :: UUIDv7.t() | String.t() | binary()
+
+  @typedoc """
+  Options allowed when sending a command.
+  """
+  @type send_opts ::
+          {:id, id()}
+          | {:correlation_id, id()}
+          | {:metadata, map()}
+          | {:timeout, :infinity | non_neg_integer()}
+          | {:routing_key, routing_key()}
+
+  @typedoc """
+  Specifies how multiple handlers should be executed.
+  """
+  @type dispatch_strategy :: :sequential | :parallel | {:parallel, Task.async_stream_option()}
+
+  @typedoc """
+  Options allowed when publishing an event.
+  """
+  @type publish_opts ::
+          send_opts()
+          | {:dispatch_strategy, dispatch_strategy()}
 end

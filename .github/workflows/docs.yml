@@ -21,8 +21,8 @@ jobs:
         id: beam
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: 1.18.x
-          otp-version: 27
+          elixir-version: 1.20.x
+          otp-version: 29
 
       - name: install dependencies
         run: mix do deps.get, deps.compile
