@@ -61,14 +61,21 @@ defmodule Ming.Router do
       for {routing_key, opts_list} <- register_by_routing_key do
         if Enum.count(opts_list) == 1 do
           current_opts = Enum.at(opts_list, 0)
+
           quote do
             defp do_send(unquote(routing_key), command, opts) do
-              do_dispatcher(unquote(routing_key), command, unquote(Macro.escape(current_opts)), opts)
+              do_dispatcher(
+                unquote(routing_key),
+                command,
+                unquote(Macro.escape(current_opts)),
+                opts
+              )
             end
           end
         else
           quote do
-            defp do_send(unquote(routing_key), _command, _opts), do: {:error, :more_than_one_handler_found}
+            defp do_send(unquote(routing_key), _command, _opts),
+              do: {:error, :more_than_one_handler_found}
           end
         end
       end
@@ -77,15 +84,22 @@ defmodule Ming.Router do
       for {routing_key, opts_list} <- register_by_routing_key do
         if Enum.count(opts_list) == 1 do
           current_opts = Enum.at(opts_list, 0)
+
           quote do
             defp do_publish(unquote(routing_key), event, opts) do
-              do_dispatcher(unquote(routing_key), event, unquote(Macro.escape(current_opts)), opts)
+              do_dispatcher(
+                unquote(routing_key),
+                event,
+                unquote(Macro.escape(current_opts)),
+                opts
+              )
             end
           end
         else
           quote do
             defp do_publish(unquote(routing_key), event, opts) do
               all_opts = unquote(Macro.escape(opts_list))
+
               Enum.map(
                 all_opts,
                 &do_dispatcher(unquote(routing_key), event, &1, opts)
