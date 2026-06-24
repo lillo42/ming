@@ -65,28 +65,14 @@ defmodule Ming.CommandProcessor do
           end
         else
           quote do
-            defp do_publish(unquote(routing_key), event, opts) do
-              routers = unquote(routers_list)
-
-              case Keyword.get(opts, :dispatch_strategy, :sequential) do
-                :sequential ->
-                  Enum.map(routers, & &1.publish(unquote(routing_key), event, opts))
-
-                :parallel ->
-                  Task.async_stream(routers, & &1.publish(unquote(routing_key), event, opts))
-                  |> Stream.map(&extract_stream_resp(&1))
-                  |> Enum.to_list()
-
-                {:parallel, async_opts} ->
-                  Task.async_stream(
-                    routers,
-                    & &1.publish(unquote(routing_key), event, opts),
-                    async_opts
-                  )
-                  |> Stream.map(&extract_stream_resp(&1))
-                  |> Enum.to_list()
-              end
-            end
+            defp do_publish(unquote(routing_key), event, opts),
+              do:
+                execute_dispatch_strategy(
+                  Keyword.get(opts, :dispatch_strategy, :sequential),
+                  unquote(routers_list),
+                  event,
+                  opts
+                )
           end
         end
       end
@@ -142,6 +128,21 @@ defmodule Ming.CommandProcessor do
 
       defp extract_stream_resp({:ok, res}), do: res
       defp extract_stream_resp({:exit, reason}), do: {:error, reason}
+
+      defp execute_dispatch_strategy(:sequential, routers, routing_key, event, opts),
+        do: Enum.map(routers, & &1.publish(routing_key, event, opts))
+
+      defp execute_dispatch_strategy(:parallel, routers, routing_key, event, opts),
+        do:
+          Task.async_stream(routers, & &1.publish(routing_key, event, opts))
+          |> Stream.map(&extract_stream_resp(&1))
+          |> Enum.to_list()
+
+      defp execute_dispatch_strategy({:parallel, async_opts}, routers, routing_key, event, opts),
+        do:
+          Task.async_stream(routers, & &1.publish(routing_key, event, opts), async_opts)
+          |> Stream.map(&extract_stream_resp(&1))
+          |> Enum.to_list()
     end
   end
 end
