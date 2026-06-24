@@ -128,7 +128,8 @@ defmodule Ming.Router do
       @doc """
       Publishes an event to all handlers registered for the given `routing_key`.
       """
-      @spec publish(Ming.routing_key(), any(), keyword(Ming.publish_opts())) :: Ming.resp() | [Ming.resp()]
+      @spec publish(Ming.routing_key(), any(), keyword(Ming.publish_opts())) ::
+              Ming.resp() | [Ming.resp()]
       def publish(routing_key, event, opts \\ []), do: do_publish(routing_key, event, opts)
 
       unquote(publish_clauses)
