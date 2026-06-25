@@ -13,7 +13,7 @@ Provides support for:
 - First-class `:telemetry` and structured logging integration
 - Configurable execution timeouts
 
-Requires Erlang/OTP v27 and Elixir v1.18 or later.
+Requires Erlang/OTP v27 and Elixir v1.20 or later.
 
 ## Installation
 
@@ -22,7 +22,7 @@ Add `:ming` to the list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:ming, "~> 0.1.2"}
+    {:ming, "~> 0.2.0"}
   ]
 end
 ```
@@ -110,6 +110,9 @@ end
 
 # The processor automatically routes to UserRouter based on the struct
 MyApp.CommandProcessor.send(%CreateUser{name: "Jane"})
+
+# You can also use a custom routing key via opts
+MyApp.CommandProcessor.send(%{payload: "data"}, routing_key: :custom_key)
 
 # Similarly, publish supports passing options like `dispatch_strategy`
 MyApp.CommandProcessor.publish(%UserCreated{id: 123}, dispatch_strategy: :parallel)

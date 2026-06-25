@@ -38,7 +38,7 @@ defmodule Ming.Middleware.CallHandlerTest do
 
   test "handles nil", %{context: context} do
     ctx = CallHandler.before_handle(%{context | request: %{val: nil}})
-    assert Context.response(ctx) == :ok
+    assert Context.response(ctx) == {:ok, nil}
   end
 
   test "handles {:error, reason}", %{context: context} do

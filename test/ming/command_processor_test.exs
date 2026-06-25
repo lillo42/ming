@@ -54,9 +54,9 @@ defmodule Ming.CommandProcessorTest do
       assert :ok = MyProcessor.send(%CommandTwo{})
     end
 
-    test "routes command correctly when using an atom routing key" do
-      assert {:ok, 10} = MyProcessor.send(%{payload: 10}, :atom_key_one)
-      assert {:ok, 20} = MyProcessor.send(%{payload: 20}, :atom_key_two)
+    test "routes command with routing_key in opts" do
+      assert {:ok, 10} = MyProcessor.send(%{payload: 10}, routing_key: :atom_key_one)
+      assert {:ok, 20} = MyProcessor.send(%{payload: 20}, routing_key: :atom_key_two)
     end
 
     test "returns unregistered for unknown command" do
@@ -80,13 +80,18 @@ defmodule Ming.CommandProcessorTest do
       assert {:ok, 40} = MyProcessor.publish(%{payload: 40}, :atom_key_two)
     end
 
+    test "publishes event with routing_key in opts" do
+      assert {:ok, 30} = MyProcessor.publish(%{payload: 30}, routing_key: :atom_key_one)
+      assert {:ok, 40} = MyProcessor.publish(%{payload: 40}, routing_key: :atom_key_two)
+    end
+
     test "publishes event sequentially to multiple routers by default" do
       # Both RouterOne and RouterTwo handle EventOne.
       assert [{:ok, 100}, {:ok, 100}] = MyProcessor.publish(%EventOne{val: 100})
     end
 
     test "publishes event in parallel" do
-      results = MyProcessor.publish(%EventOne{val: 99}, execute_mode: :parallel)
+      results = MyProcessor.publish(%EventOne{val: 99}, dispatch_strategy: :parallel)
       assert length(results) == 2
       assert {:ok, 99} in results
     end
