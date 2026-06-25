@@ -45,7 +45,14 @@ defmodule Ming.MixProject do
       {:ex_doc, "~> 0.20", only: :dev, runtime: false},
 
       # Analyser
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+
+      # Message Mapper 
+      {:jason, "~> 1.4", optional: true},
+
+      # Message gateways
+      {:nimble_pool, "~> 1.1", optional: true},
+      {:amqp, "~> 4.1", optional: true}
     ]
   end
 

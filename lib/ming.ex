@@ -42,4 +42,42 @@ defmodule Ming do
   @type publish_opts ::
           send_opts()
           | {:dispatch_strategy, dispatch_strategy()}
+
+  @type provision_strategy :: :assume | :validate | :create | :create_or_override
+
+  @type provision :: provision_strategy() | {provision_strategy(), any()}
+
+  @type provision(t) :: provision_strategy() | {provision_strategy(), t}
+
+  @type cloudevent_mode :: :binary | :json
+
+  @type publication_opts ::
+          {:additional_cloudevent_properties, map() | nil}
+          | {:cloudevent_mode, cloudevent_mode()}
+          | {:content_type, String.t() | atom() | nil}
+          | {:data_schema, URI.t() | String.t() | nil}
+          | {:default_headers, map() | nil}
+          | {:provision, provision()}
+          | {:reply_to, routing_key() | String.t() | URI.t() | nil}
+          | {:routing_key, routing_key()}
+          | {:source, URI.t() | String.t()}
+          | {:spec_version, String.t() | nil}
+          | {:subject, String.t() | nil}
+          | {:topic_or_queue, String.t()}
+          | {:type, String.t() | atom()}
+
+  @type subscription_opts ::
+          {:buffer_size, non_neg_integer()}
+          | {:cloudevent_mode, cloudevent_mode()}
+          | {:empty_delay, timeout()}
+          | {:failure_delay, timeout()}
+          | {:name, String.t() | atom()}
+          | {:number_of_performers, non_neg_integer()}
+          | {:processing_timeout, timeout()}
+          | {:provision, provision()}
+          | {:requeue_count, non_neg_integer() | nil}
+          | {:requeue_delay, timeout()}
+          | {:routing_key, routing_key()}
+          | {:queue_or_topic, String.t() | atom() | URI.t()}
+          | {:timeout, timeout()}
 end
