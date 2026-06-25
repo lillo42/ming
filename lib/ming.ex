@@ -48,7 +48,7 @@ defmodule Ming do
 
   @type provision :: provision_strategy() | {provision_strategy(), any()}
 
-  @type provision(t) :: provision_strategy() | {provision_strategy(), t}
+  @type provision(t) :: {provision_strategy(), t}
 
   @type cloudevent_mode :: :binary | :json
 

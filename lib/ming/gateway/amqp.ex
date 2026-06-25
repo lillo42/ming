@@ -1,5 +1,32 @@
 if Code.ensure_loaded?(AMQP) do
   defmodule Ming.Gateway.AMQP do
+    @moduledoc """
+    AMQP gateway supervisor that manages connections, publishers, and consumers.
+
+    This module implements the `Ming.Gateway` behaviour and starts a supervision tree
+    with the following children:
+    - a single `Ming.Gateway.AMQP.Connection`
+    - one `NimblePool` per configured publication (for publishing)
+    - one `Ming.Gateway.AMQP.Consumer` and one `NimblePool` per configured subscription
+
+    ## Example configuration
+
+        [
+          adapter: Ming.Gateway.AMQP,
+          name: :my_amqp,
+          config: [
+            connection: [uri: "amqp://guest:guest@localhost"],
+            exchange: [name: "events", type: :topic],
+            publications: [
+              [routing_key: :order_created, number_of_performers: 2]
+            ],
+            subscriptions: [
+              [name: :orders, topic_or_queue: "orders.queue", routing_key: :order_created]
+            ]
+          ]
+        ]
+    """
+
     use Supervisor
 
     alias AMQP.Channel
@@ -11,6 +38,7 @@ if Code.ensure_loaded?(AMQP) do
     alias Ming.Gateway.AMQP.MessageProcess
     alias Ming.Gateway.AMQP.Publisher
 
+    @typedoc """Options for connecting to an AMQP broker."""
     @type connection ::
             {:uri, String.t() | URI.t() | nil}
             | {:username, String.t() | nil}
@@ -28,39 +56,21 @@ if Code.ensure_loaded?(AMQP) do
             | {:auth_mechanisms, any() | nil}
             | {:name, String.t() | nil}
 
+    @typedoc """Supported AMQP exchange types."""
     @type exchange_type :: :direct | :fanout | :topic | :headers
 
-    # @type exchange ::
-    #         {:arguments, AMQP.arguments()}
-    #         | {:durable, boolean()}
-    #         | {:name, String.t() | atom()}
-    #         | {:support_delay, boolean()}
-    #         | {:type, exchange_type()}
-    #
-    # @type config ::
-    #         {:connection, connection()}
-    #         | {:dead_letter_exchange, exchange() | nil}
-    #         | {:exchange, exchange() | nil}
-    #         | {:module, module()}
-    #         | {:name, String.t()}
-    #
-    # @type amqp_provision_opts ::
-    #         {:exchange, exchange()}
-    #         | {:dead_letter_exchange, exchange()}
-    #         | {:idle_timeout, timeout()}
-    #         | {:idle_pings, timeout()}
-
-    # [adapter: module(), name: atom(), config : []]
-    # e
+    @doc """
+    Starts the AMQP gateway supervisor.
+    """
+    @spec start_link(keyword()) :: Supervisor.on_start()
     def start_link(args) do
       Supervisor.start_link(__MODULE__, args, name: Keyword.get(args, :name, __MODULE__))
     end
 
+    @impl true
     def init(args) do
       config = Keyword.fetch!(args, :config)
       name = Keyword.get(config, :name, __MODULE__)
-
-      command_process = Keyword.fetch!(args, :command_process)
 
       connection_config =
         config
@@ -70,7 +80,7 @@ if Code.ensure_loaded?(AMQP) do
       children =
         [{Connection, connection_config}]
         |> publication(name, Keyword.get(config, :publications, []))
-        |> subscriptions(name, command_process, Keyword.get(config, :subscriptions, []))
+        |> subscriptions(name, Keyword.fetch!(args, :command_process), Keyword.get(config, :subscriptions, []))
 
       Supervisor.init(children, strategy: :one_for_one)
     end
@@ -115,6 +125,12 @@ if Code.ensure_loaded?(AMQP) do
     end
 
     @behaviour Ming.Gateway
+    @doc """
+    Provisions AMQP infrastructure (exchanges, queues, bindings) before the gateway starts.
+
+    This is called by `Ming.Gateway.Supervisor` during startup.
+    """
+    @impl Ming.Gateway
     def provision_infrastructure(args) do
       config = Keyword.fetch!(args, :config)
       connection = Keyword.fetch!(config, :connection)
@@ -126,7 +142,7 @@ if Code.ensure_loaded?(AMQP) do
       |> create_channel()
       |> ensure_exchange_exists(exchange)
       |> ensure_exchange_exists(Keyword.get(config, :dead_letter_exchange))
-      |> ensure_queues_exists(Keyword.get(args, :subscription, []), exchange_name)
+      |> ensure_queues_exists(Keyword.get(args, :subscriptions, []), exchange_name)
       |> close_channel()
       |> close_conn()
     end

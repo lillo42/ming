@@ -1,5 +1,12 @@
 if Code.ensure_loaded?(AMQP) do
   defmodule Ming.Gateway.AMQP.Publisher do
+    @moduledoc """
+    NimblePool worker that manages a pool of AMQP channels for publishing.
+
+    Channels are checked out per-publish, kept alive while in use, and closed
+    when the worker is terminated or idle for too long.
+    """
+
     alias AMQP.Basic
     alias AMQP.Channel
 
@@ -7,6 +14,11 @@ if Code.ensure_loaded?(AMQP) do
 
     @behaviour NimblePool
 
+    @doc """
+    Publishes a message through a pooled AMQP channel.
+    """
+    @spec publish(atom(), String.t(), String.t(), binary(), keyword()) ::
+            :ok | {:error, any()}
     def publish(pool_name, exchange, routing_key, payload, opts) do
       NimblePool.checkout!(pool_name, :publish, fn _ref, channel ->
         result = Basic.publish(channel, exchange, routing_key, payload, opts)
@@ -24,8 +36,13 @@ if Code.ensure_loaded?(AMQP) do
 
     @impl NimblePool
     def init_worker(%{connection: conn} = state) do
-      {:ok, channel} = Channel.open(conn)
-      {:ok, %{channel: channel, last_usage: DateTime.utc_now()}, state}
+      case Channel.open(conn) do
+        {:ok, channel} ->
+          {:ok, %{channel: channel, last_usage: DateTime.utc_now()}, state}
+
+        {:error, reason} ->
+          {:remove, {:channel_open_failed, reason}}
+      end
     end
 
     @impl NimblePool
@@ -35,6 +52,15 @@ if Code.ensure_loaded?(AMQP) do
       else
         {:remove, :dead, pool_state}
       end
+    end
+
+    @impl NimblePool
+    def handle_checkin(:ok, _from, _worker_state, pool_state) do
+      {:ok, pool_state}
+    end
+
+    def handle_checkin({:error, _reason}, _from, _worker_state, pool_state) do
+      {:ok, pool_state}
     end
 
     @impl NimblePool
@@ -55,7 +81,7 @@ if Code.ensure_loaded?(AMQP) do
       timeout = Keyword.get(publication, :idle_timeout, :infinity)
       now = DateTime.utc_now()
 
-      if timeout == :infinity or DateTime.diff(now, last_usage) < timeout do
+      if timeout == :infinity or DateTime.diff(now, last_usage, :millisecond) < timeout do
         {:ok, worker_state}
       else
         {:remove, :idle_timeout}

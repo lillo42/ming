@@ -1,5 +1,13 @@
 if Code.ensure_loaded?(AMQP) do
   defmodule Ming.Gateway.AMQP.Producer do
+    @moduledoc """
+    Implementation of `Ming.Message.Producer` for the AMQP gateway.
+
+    Converts `%Ming.Message{}` structs into AMQP Basic.publish calls via
+    `Ming.Gateway.AMQP.Publisher`. Supports CloudEvents headers in both
+    `:binary` and `:json` modes.
+    """
+
     alias Ming.Message
     alias Ming.Message.Baggage
     alias Ming.Message.TraceState
@@ -9,7 +17,7 @@ if Code.ensure_loaded?(AMQP) do
 
     @impl Ming.Message.Producer
     def publish(messages, opts) when is_list(messages),
-      do: Enum.map(messages, &send(&1, opts))
+      do: Enum.map(messages, &publish(&1, opts))
 
     def publish(%Message{} = message, opts) do
       gateway = Keyword.fetch!(opts, :gateway)
@@ -29,7 +37,7 @@ if Code.ensure_loaded?(AMQP) do
         |> put_if_not_nil(:persistent, Keyword.get(publication, :persistent))
         |> put_if_not_nil(:priority, Keyword.get(extra_opts, :priority))
         |> put_if_not_nil(:reply_to, message.reply_to)
-        |> put_if_not_nil(:timestamp, message.timestamp)
+        |> put_if_not_nil(:timestamp, DateTime.to_unix(message.timestamp))
         |> put_headers(
           message,
           Keyword.get(publication, :default_headers, %{}),
@@ -72,7 +80,7 @@ if Code.ensure_loaded?(AMQP) do
         |> put_if_not_nil("cloudEvents:specversion", message.spec_version)
         |> put_if_not_nil("cloudEvents:source", message.source)
         |> put_if_not_nil("cloudEvents:subject", message.subject)
-        |> put_if_not_nil("cloudEvents:time", message.timestamp)
+        |> put_if_not_nil("cloudEvents:time", DateTime.to_iso8601(message.timestamp))
         |> put_if_not_nil("cloudEvents:traceparent", message.trace_parent)
         |> put_if_not_nil("cloudEvents:tracestate", TraceState.to_string(message.trace_state))
         |> put_if_not_nil("cloudEvents:type", message.type)

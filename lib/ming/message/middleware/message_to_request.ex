@@ -1,4 +1,11 @@
 defmodule Ming.Message.Middleware.MessageToRequest do
+  @moduledoc """
+  Middleware that converts a %Ming.Message{} back to a domain request
+  using a configured mapper module.
+
+  Expects `:ming_mapper` in context assigns.
+  """
+
   alias Ming.Context
 
   @behaviour Ming.Middleware

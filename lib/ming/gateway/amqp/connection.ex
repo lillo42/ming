@@ -1,12 +1,26 @@
 if Code.ensure_loaded?(AMQP) do
   defmodule Ming.Gateway.AMQP.Connection do
+    @moduledoc """
+    GenServer that holds a single AMQP connection and monitors it.
+
+    On crash the connection is closed gracefully via `terminate/2`.
+    """
+
     use GenServer
 
+    @doc """
+    Starts the connection holder linked to the current process.
+    """
+    @spec start_link(keyword()) :: GenServer.on_start()
     def start_link(opts) do
       name = Keyword.fetch!(opts, :name)
       GenServer.start_link(__MODULE__, opts, name: name)
     end
 
+    @doc """
+    Returns the underlying `%AMQP.Connection{}` struct.
+    """
+    @spec get_connection!(atom() | pid()) :: AMQP.Connection.t()
     def get_connection!(name) do
       GenServer.call(name, :get_connection)
     end
@@ -30,7 +44,7 @@ if Code.ensure_loaded?(AMQP) do
           {:ok, %{connection: conn}}
 
         {:error, reason} ->
-          {:error, reason}
+          {:stop, reason}
       end
     end
 

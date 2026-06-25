@@ -1,4 +1,11 @@
 defmodule Ming.Message.Baggage do
+  @moduledoc """
+  Utilities for parsing and serializing W3C baggage header values.
+
+  Baggage is a key-value format with optional metadata used for
+  propagating context across message boundaries.
+  """
+
   def put(map, key, val, metadata), do: Map.put(map, key, value: val, metadata: metadata)
   def put_new(map, key, val, metadata), do: Map.put_new(map, key, value: val, metadata: metadata)
 

@@ -1,4 +1,11 @@
 defmodule Ming.Message.Middleware.RequestToMessage do
+  @moduledoc """
+  Middleware that converts a domain request into a %Ming.Message{}
+  using a configured mapper module.
+
+  Expects `:ming_mapper` in context assigns.
+  """
+
   alias Ming.Context
   alias Ming.Message
 
@@ -26,7 +33,7 @@ defmodule Ming.Message.Middleware.RequestToMessage do
       _other ->
         context
         |> Context.halt()
-        |> Context.respond({:error, :invalid_message_mapper_resposne})
+        |> Context.respond({:error, :invalid_message_mapper_response})
     end
   end
 
