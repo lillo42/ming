@@ -1,105 +1,141 @@
 defmodule Ming.CommandProcessor do
   @moduledoc """
-  Provides a high-level command processing interface built on top of Ming's composite routing system.
+  Macro-based command processor that aggregates multiple routers.
 
-  This module serves as the primary entry point for command processing in the Ming framework,
-  wrapping the `Ming.CompositeRouter` with simplified configuration and sensible defaults
-  optimized for command processing scenarios.
-
-  ## Key Features
-  - Simplified configuration for command processing applications
-  - Unified interface for both command sending and event publishing
-  - Built-in concurrency control for event processing
-  - Sensible defaults optimized for command processing workloads
-  - Easy integration with existing CompositeRouter infrastructure
-
-  ## Usage
-  Use this module to create a command processor for your application:
-
-      defmodule MyApp.CommandProcessor do
-        use Ming.CommandProcessor,
-          otp_app: :my_app,
-          max_concurrency: 4,
-          concurrency_timeout: 30_000,
-          dispatch_opts: [timeout: 15_000, retry_attempts: 3]
-
-        # Include domain routers that contain command handlers
-        router MyApp.Accounting.Router
-        router MyApp.Inventory.Router
-        router MyApp.Shipping.Router
-      end
-
-  Then use the command processor to send commands and publish events:
-
-      # Send commands
-      MyApp.CommandProcessor.send(%CreateUser{name: "John", email: "john@example.com"})
-
-      # Publish events (e.g., from aggregate roots)
-      MyApp.CommandProcessor.publish(%UserCreated{id: 123, name: "John"})
-
-  ## Design Philosophy
-
-  The CommandProcessor is designed as the top-level abstraction for CQRS applications,
-  providing a simple yet powerful interface that hides the complexity of the underlying
-  routing system while exposing all necessary functionality.
+  It builds routing tables at compile time and dispatches `send/2` and
+  `publish/2` calls to the correct router module.
   """
 
   @doc """
-  Sets up the CommandProcessor module with optimized configuration for command processing.
-
-  This macro is invoked when using `Ming.CommandProcessor` in another module.
-  It configures the underlying `Ming.CompositeRouter` with defaults optimized
-  for command processing scenarios.
-
-  ## Options
-  - `:otp_app` - The OTP application name (required)
-  - `:max_concurrency` - Maximum number of concurrent event publications (default: `1`)
-  - `:concurrency_timeout` - Timeout for concurrent publishing operations (default: `5000`)
-  - `:task_supervisor` - Task supervisor for async operations (default: `Ming.TaskSupervisor`)
-  - `:dispatch_opts` - Default options applied to both send and publish operations
-
-  ## Required Options
-  - `:otp_app` - Must be provided and cannot be defaulted
-
-  ## Examples
-      use Ming.CommandProcessor,
-        otp_app: :my_app,
-        max_concurrency: 2,
-        concurrency_timeout: 15_000,
-        dispatch_opts: [timeout: 10_000, retry_attempts: 2]
-
-  ## Note
-  Unlike `Ming.CompositeRouter`, this module uses a single `:dispatch_opts` parameter
-  that applies to both send and publish operations, simplifying configuration for
-  command processing scenarios where consistent behavior is desired.
+  Injects router aggregation macros.
   """
-  defmacro __using__(opts) do
-    app = Keyword.fetch!(opts, :otp_app)
-    max_concurrency = Keyword.get(opts, :max_concurrency, 1)
-    concurrency_timeout = Keyword.get(opts, :concurrency_timeout, 5_000)
-    task_supervisor = Keyword.get(opts, :task_supervisor, Ming.TaskSupervisor)
-    dispatch_opts = Keyword.get(opts, :dispatch_opts, [])
-
+  defmacro __using__(_opts) do
     quote do
       import unquote(__MODULE__)
 
       @before_compile unquote(__MODULE__)
 
-      use Ming.CompositeRouter,
-        otp_app: unquote(app),
-        max_concurrency: unquote(max_concurrency),
-        concurrency_timeout: unquote(concurrency_timeout),
-        task_supervisor: unquote(task_supervisor),
-        default_send_opts: unquote(dispatch_opts),
-        default_publish_opts: unquote(dispatch_opts)
+      Module.register_attribute(__MODULE__, :routers, accumulate: true)
+    end
+  end
+
+  @doc """
+  Registers a router and all its routing keys into the processor.
+  """
+  defmacro router(router_ast) do
+    router = Macro.expand(router_ast, __CALLER__)
+
+    for routing_key <- router.__register_routing_keys__() do
+      quote generated: true do
+        @routers {unquote(routing_key), unquote(router)}
+      end
     end
   end
 
   @doc false
-  defmacro __before_compile__(_env) do
-    quote do
-      # Empty implementation - maintains compatibility with the @before_compile behavior
-      # while providing a hook for future extensions specific to command processing
+  defmacro __before_compile__(env) do
+    routers = Module.get_attribute(env.module, :routers) || []
+    routing_key_by_module = Enum.group_by(routers, &elem(&1, 0), &elem(&1, 1))
+
+    send_clauses =
+      for {routing_key, routers_list} <- routing_key_by_module do
+        if Enum.count(routers_list) == 1 do
+          router = Enum.at(routers_list, 0)
+
+          quote do
+            defp do_send(unquote(routing_key), command, opts),
+              do: unquote(router).send(unquote(routing_key), command, opts)
+          end
+        else
+          quote do
+            defp do_send(unquote(routing_key), _command, _opts),
+              do: {:error, :more_than_one_handler_found}
+          end
+        end
+      end
+
+    publish_clauses =
+      for {routing_key, routers_list} <- routing_key_by_module do
+        if Enum.count(routers_list) == 1 do
+          router = Enum.at(routers_list, 0)
+
+          quote do
+            defp do_publish(unquote(routing_key), event, opts),
+              do: unquote(router).publish(unquote(routing_key), event, opts)
+          end
+        else
+          quote do
+            defp do_publish(unquote(routing_key), event, opts),
+              do:
+                execute_dispatch_strategy(
+                  Keyword.get(opts, :dispatch_strategy, :sequential),
+                  unquote(routers_list),
+                  unquote(routing_key),
+                  event,
+                  opts
+                )
+          end
+        end
+      end
+
+    quote generated: true do
+      @doc """
+      Routes a command to the corresponding router for execution.
+      """
+      @spec send(any(), keyword(Ming.send_opts()) | Ming.routing_key()) :: Ming.resp()
+      def send(command, opts \\ [])
+
+      def send(command, routing_key) when is_atom(routing_key),
+        do: do_send(routing_key, command, [])
+
+      def send(command, opts) when is_list(opts) do
+        routing_key = resolve_routing_key(opts, command)
+        do_send(routing_key, command, opts)
+      end
+
+      unquote(send_clauses)
+      defp do_send(_routing_key, _request, _opts), do: {:error, :unregistered_command}
+
+      @doc """
+      Routes an event to all corresponding routers for execution.
+      """
+      @spec publish(any(), keyword(Ming.publish_opts()) | Ming.routing_key()) ::
+              Ming.resp() | [Ming.resp()]
+      def publish(event, opts \\ [])
+
+      def publish(event, routing_key) when is_atom(routing_key),
+        do: do_publish(routing_key, event, [])
+
+      def publish(event, opts) when is_list(opts) do
+        routing_key = resolve_routing_key(opts, event)
+        do_publish(routing_key, event, opts)
+      end
+
+      unquote(publish_clauses)
+      defp do_publish(_routing_key, _request, _opts), do: {:error, :unregistered_command}
+
+      defp resolve_routing_key(opts, request) when is_struct(request),
+        do: Keyword.get(opts, :routing_key, request.__struct__)
+
+      defp resolve_routing_key(opts, request), do: Keyword.fetch!(opts, :routing_key)
+
+      defp extract_stream_resp({:ok, res}), do: res
+      defp extract_stream_resp({:exit, reason}), do: {:error, reason}
+
+      defp execute_dispatch_strategy(:sequential, routers, routing_key, event, opts),
+        do: Enum.map(routers, & &1.publish(routing_key, event, opts))
+
+      defp execute_dispatch_strategy(:parallel, routers, routing_key, event, opts),
+        do:
+          Task.async_stream(routers, & &1.publish(routing_key, event, opts))
+          |> Stream.map(&extract_stream_resp(&1))
+          |> Enum.to_list()
+
+      defp execute_dispatch_strategy({:parallel, async_opts}, routers, routing_key, event, opts),
+        do:
+          Task.async_stream(routers, & &1.publish(routing_key, event, opts), async_opts)
+          |> Stream.map(&extract_stream_resp(&1))
+          |> Enum.to_list()
     end
   end
 end

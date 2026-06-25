@@ -1,290 +1,147 @@
 defmodule Ming.Dispatcher do
   @moduledoc """
-  The core dispatching module for the Ming CQRS framework.
+  Executes the middleware pipeline for a given `Ming.Context`.
 
-  This module is responsible for processing command payloads through the Ming pipeline,
-  executing handlers, managing middleware, and handling retries and errors. It serves as
-  the central coordinator for command execution in the Ming framework.
+  When a numeric timeout is configured, dispatch runs in a task and is bounded
+  by that timeout. Otherwise it runs in-process.
 
-  The dispatcher follows a structured pipeline pattern:
-  1. Convert payload to pipeline
-  2. Execute before_dispatch middleware
-  3. Execute command handler (with retry logic if needed)
-  4. Execute after_dispatch middleware on success
-  5. Execute after_failure middleware on errors
-  6. Return formatted response
+  ## Telemetry
 
-  ## Usage
+  The dispatcher emits the following telemetry events using `:telemetry.span/3`:
 
-  The dispatcher is typically called by the command processor to handle command execution.
-  It manages the complete lifecycle of command processing including telemetry, error handling,
-  and middleware execution.
+  * `[:ming, :dispatch, :start]` - Executed before the dispatch pipeline starts.
+  * `[:ming, :dispatch, :stop]` - Executed after the pipeline completes successfully.
+  * `[:ming, :dispatch, :exception]` - Executed when the pipeline raises an exception.
+
+  All events receive the following metadata:
+  * `:handler` - The module handling the request
+  * `:pid` - The PID of the process executing the pipeline
+  * `:request_id` - The unique ID of the request
+  * `:correlation_id` - The correlation ID of the request
+  * `:routing_key` - The routing key used
+  * `:timeout` - The configured timeout
   """
-
-  alias Ming.Dispatcher.Payload
-  alias Ming.ExecutionContext
-  alias Ming.Handler
-  alias Ming.Pipeline
-  alias Ming.Telemetry
 
   require Logger
 
-  defmodule Payload do
-    @moduledoc """
-    Defines the payload structure for command dispatching.
-
-    This struct contains all the necessary information to execute a command through
-    the Ming framework, including handler configuration, middleware, and execution context.
-
-    ## Fields
-
-    - `:application` - The Ming application module
-    - `:request` - The command request to be executed
-    - `:request_uuid` - Unique identifier for the request
-    - `:correlation_id` - Correlation ID for distributed tracing
-    - `:handler_module` - Module that handles the command execution
-    - `:handler_function` - Function name to call on the handler module (defaults to `:execute`)
-    - `:handler_before_execute` - Optional function to prepare the command before execution
-    - `:timeout` - Execution timeout in milliseconds
-    - `:metadata` - Additional metadata for the execution context
-    - `:retry_attempts` - Number of retry attempts remaining
-    - `:returning` - Specifies what should be returned from execution (:events, :execution_result, or false)
-    - `:type` - The dispatch type: `:command`, `:event`, `:query`, or `:unknown`
-    - `:middleware` - List of middleware modules to execute during processing
-    """
-
-    @typedoc """
-    The dispatcher payload struct type.
-
-    Encapsulates all information required to execute a command through the pipeline.
-    """
-    @type t :: %__MODULE__{}
-
-    defstruct [
-      :application,
-      :request,
-      :request_uuid,
-      :correlation_id,
-      :handler_module,
-      :handler_function,
-      :handler_before_execute,
-      :timeout,
-      :metadata,
-      :retry_attempts,
-      :returning,
-      type: :unknown,
-      middleware: []
-    ]
-  end
+  alias Ming.Context
 
   @doc """
-  Dispatches a command payload through the Ming execution pipeline.
-
-  This is the main entry point for command execution. It handles the complete
-  processing lifecycle including middleware execution, handler invocation,
-  error handling, and telemetry.
-
-  ## Parameters
-  - `payload`: A `Ming.Dispatcher.Payload.t()` containing command execution details
-
-  ## Returns
-  - `:ok` - Command executed successfully (when returning: false)
-  - `{:ok, events}` - Command executed successfully with generated events (when returning: :events)
-  - `{:ok, execution_result}` - Command executed successfully with execution result (when returning: :execution_result)
-  - `{:error, reason}` - Command execution failed
-
-  ## Examples
-      payload = %Ming.Dispatcher.Payload{
-        application: MyApp,
-        request: %OpenAccount{account_number: "ACC123", initial_balance: 1000},
-        handler_module: BankAccountHandler,
-        timeout: 5000
-      }
-
-      case Ming.Dispatcher.dispatch(payload) do
-        {:ok, events} ->
-          # Handle successful execution with events
-        {:error, reason} ->
-          # Handle execution failure
-      end
+  Dispatches a context through the middleware pipeline.
   """
-  @spec dispatch(payload :: Payload.t()) :: :ok | {:ok, any()} | {:error, any()}
-  def dispatch(%Payload{} = payload) do
-    pipeline = to_pipeline(payload)
-    telemetry_metadata = telemetry_metadata(pipeline, payload)
+  def dispatch(%Context{timeout: timeout} = context) when is_number(timeout) and timeout > 0 do
+    log_meta = log_metadata(context)
 
-    start_time = telemetry_start(telemetry_metadata)
+    task = Task.async(fn -> do_dispatcher(context) end)
 
-    try do
-      pipeline = before_dispatch(pipeline, payload)
+    case Task.yield(task, timeout) do
+      {:ok, context} ->
+        Logger.debug("executed with success", log_meta)
+        context
 
-      # Stop command execution if pipeline has been halted
-      if Pipeline.halted?(pipeline) do
-        pipeline
-        |> after_failure(payload)
-        |> telemetry_stop(start_time, telemetry_metadata)
-        |> Pipeline.response()
-      else
-        context = to_execution_context(pipeline, payload)
-
-        pipeline
-        |> execute(payload, context)
-        |> telemetry_stop(start_time, telemetry_metadata)
-        |> Pipeline.response()
-      end
-    rescue
-      error ->
-        Telemetry.stop(
-          [:ming, :application, :dispatch],
-          start_time,
-          Map.put(telemetry_metadata, :error, error)
+      {:exit, reason} ->
+        Logger.error(
+          "error during executing pipeline",
+          Keyword.put(log_meta, :crash_reason, inspect(reason))
         )
 
-        reraise error, __STACKTRACE__
+        context
+        |> Context.halt()
+        |> Context.respond({:error, reason})
+
+      nil ->
+        Logger.warning("timeout during executing, going to shutdown", log_meta)
+
+        Task.shutdown(task)
+
+        context
+        |> Context.halt()
+        |> Context.respond({:error, :timeout})
     end
   end
 
-  @doc false
-  defp to_pipeline(%Payload{} = payload) do
-    struct(Pipeline, Map.from_struct(payload))
-  end
+  def dispatch(%Context{} = context) do
+    log_meta = log_metadata(context)
 
-  @doc false
-  defp execute(%Pipeline{} = pipeline, %Payload{} = payload, %ExecutionContext{} = context) do
-    %Pipeline{application: application} = pipeline
-    %Payload{timeout: timeout} = payload
+    try do
+      context = do_dispatcher(context)
 
-    result = Handler.execute(application, context, timeout)
+      Logger.debug("executed with success", log_meta)
+      context
+    rescue
+      reason ->
+        Logger.error(
+          "error during executing pipeline",
+          Keyword.put(log_meta, :crash_reason, inspect(reason))
+        )
 
-    case result do
-      {:ok, response} ->
-        pipeline
-        |> Pipeline.assign(:response, response)
-        |> after_dispatch(payload)
-        |> Pipeline.respond(format_reply(response, context))
-
-      {:error, :handler_execution_timeout} ->
-        # Maybe retry command when aggregate process not found on a remote node
-        maybe_retry(pipeline, payload, context)
-
-      {:error, error} ->
-        pipeline
-        |> Pipeline.respond({:error, error})
-        |> after_failure(payload)
-
-      {:error, error, reason} ->
-        pipeline
-        |> Pipeline.assign(:error_reason, reason)
-        |> Pipeline.respond({:error, error})
-        |> after_failure(payload)
+        context
+        |> Context.halt()
+        |> Context.respond({:error, reason})
     end
   end
 
-  @doc false
-  defp to_execution_context(%Pipeline{} = pipeline, %Payload{} = payload) do
-    %Pipeline{request: request, request_uuid: request_uuid, metadata: metadata} = pipeline
+  defp do_dispatcher(%Context{} = context) do
+    telemetry_metadata = telemetry_metadata(context)
 
-    %Payload{
-      correlation_id: correlation_id,
-      handler_module: handler_module,
-      handler_function: handler_function,
-      handler_before_execute: handler_before_execute,
-      retry_attempts: retry_attempts,
-      returning: returning
-    } = payload
+    :telemetry.span(
+      [:ming, :dispatch],
+      telemetry_metadata,
+      fn ->
+        context =
+          context
+          |> do_before()
+          |> do_after()
 
-    %ExecutionContext{
-      request: request,
-      causation_id: request_uuid,
-      correlation_id: correlation_id,
-      metadata: metadata,
-      handler: handler_module,
-      function: handler_function,
-      before_execute: handler_before_execute,
-      retry_attempts: retry_attempts,
-      returning: returning
-    }
+        {context, telemetry_metadata}
+      end
+    )
   end
 
-  @doc false
-  defp before_dispatch(%Pipeline{} = pipeline, %Payload{middleware: middleware}) do
-    Pipeline.chain(pipeline, :before_dispatch, middleware)
+  defp do_before(%Context{} = context) do
+    Enum.reduce_while(context.middlewares, {context, []}, fn middleware, acc ->
+      {context, middlewares} = acc
+
+      context = middleware.before_handle(context)
+
+      # Always include the current middleware in the after-chain,
+      # even if it halts, so its after_handle is unwound.
+      middlewares = [middleware | middlewares]
+
+      if Context.halted?(context) do
+        {:halt, {context, middlewares}}
+      else
+        {:cont, {context, middlewares}}
+      end
+    end)
   end
 
-  @doc false
-  defp after_dispatch(%Pipeline{} = pipeline, %Payload{middleware: middleware}) do
-    Pipeline.chain(pipeline, :after_dispatch, middleware)
+  defp do_after({%Context{} = context, middlewares}) when is_list(middlewares) do
+    Enum.reduce(middlewares, context, fn middleware, acc ->
+      context = acc
+      middleware.after_handle(context)
+    end)
   end
 
-  @doc false
-  defp after_failure(%Pipeline{response: {:error, error}} = pipeline, %Payload{} = payload) do
-    %Payload{middleware: middleware} = payload
-
-    pipeline
-    |> Pipeline.assign(:error, error)
-    |> Pipeline.chain(:after_failure, middleware)
-  end
-
-  @doc false
-  defp after_failure(%Pipeline{} = pipeline, %Payload{} = payload) do
-    %Payload{middleware: middleware} = payload
-
-    Pipeline.chain(pipeline, :after_failure, middleware)
-  end
-
-  @doc false
-  defp telemetry_start(telemetry_metadata) do
-    Telemetry.start([:ming, :application, :dispatch], telemetry_metadata)
-  end
-
-  @doc false
-  defp telemetry_stop(
-         %Pipeline{assigns: assigns} = pipeline,
-         start_time,
-         telemetry_metadata
-       ) do
-    event_prefix = [:ming, :application, :dispatch]
-
-    case assigns do
-      %{error: error} ->
-        Telemetry.stop(event_prefix, start_time, Map.put(telemetry_metadata, :error, error))
-
-      _ ->
-        Telemetry.stop(event_prefix, start_time, telemetry_metadata)
-    end
-
-    pipeline
-  end
-
-  @doc false
-  defp telemetry_metadata(%Pipeline{} = pipeline, %Payload{} = payload) do
-    %Payload{application: application} = payload
-
-    context = to_execution_context(pipeline, payload)
-
+  defp telemetry_metadata(%Context{} = context) do
     %{
-      application: application,
-      error: nil,
-      execution_context: context,
-      dispatcher_type: payload.type
+      handler: context.handler,
+      pid: self(),
+      request_id: context.id,
+      correlation_id: context.correlation_id,
+      routing_key: context.routing_key,
+      timeout: context.timeout
     }
   end
 
-  @doc false
-  defp maybe_retry(pipeline, payload, context) do
-    case ExecutionContext.retry(context) do
-      {:ok, context} ->
-        execute(pipeline, payload, context)
-
-      reply ->
-        pipeline
-        |> Pipeline.respond(reply)
-        |> after_failure(payload)
-    end
-  end
-
-  @doc false
-  defp format_reply(events, %Ming.ExecutionContext{} = context) do
-    Ming.ExecutionContext.format_reply({:ok, events}, context)
+  defp log_metadata(%Context{} = context) do
+    [
+      handler: context.handler,
+      pid: self(),
+      request_id: context.id,
+      correlation_id: context.correlation_id,
+      routing_key: context.routing_key,
+      timeout: context.timeout
+    ]
   end
 end

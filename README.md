@@ -1,16 +1,19 @@
 # Ming
 
-Ming is a library focused on CQRS pattern, heavily inspired by [Brighter](https://github.com/BrighterCommand/Brighter) C# Framework and [Commanded](https://github.com/commanded/commanded/) Elixir library.
+Ming is a lightweight, `Plug`-inspired pipeline framework for routing Commands, Queries, and Events in Elixir. 
+
+While initially inspired by C# frameworks like Brighter, Ming has been completely rewritten to embrace Elixir's functional nature, relying on highly optimized compile-time routing and simple data transformations via `%Ming.Context{}`.
 
 Provides support for:
 
-- Command registration and dispatch
-- Event registration and dispatch
-- Query registration and dispatch
-- Middleware pipeline for cross-cutting concerns
-- Telemetry integration for monitoring
+- Command, Event, and Query registration and dispatch
+- Unified Router architecture mapping payloads to handlers
+- Aggregate dispatching via Command Processor
+- A flexible, context-driven Middleware pipeline (similar to Plug)
+- First-class `:telemetry` and structured logging integration
+- Configurable execution timeouts
 
-Requires Erlang/OTP v27 and Elixir v1.18 or later.
+Requires Erlang/OTP v27 and Elixir v1.20 or later.
 
 ## Installation
 
@@ -19,14 +22,16 @@ Add `:ming` to the list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:ming, "~> 0.1.2"}
+    {:ming, "~> 0.2.0"}
   ]
 end
 ```
 
 ## Quick Start
 
-### 1. Define a command and handler
+### 1. Define a struct and a handler
+
+Handlers implement the `Ming.Handler` behaviour. They take a `%Ming.Context{}` and return it, optionally setting a response via `Ming.Context.respond/2`.
 
 ```elixir
 defmodule CreateUser do
@@ -34,97 +39,125 @@ defmodule CreateUser do
 end
 
 defmodule UserHandler do
-  def execute(%CreateUser{} = command, _context) do
+  @behaviour Ming.Handler
+
+  def handle(%CreateUser{}, %Ming.Context{} = context) do
     # Business logic here
-    :ok
+    # ...
+    Ming.Context.respond(context, :ok)
   end
 end
 ```
 
-### 2. Create a router
+### 2. Create a Router
+
+Routers map incoming requests to their respective handlers and define the middleware pipeline.
 
 ```elixir
-defmodule MyApp.Router do
-  use Ming.Router, ming: :my_app
+defmodule MyApp.UserRouter do
+  use Ming.Router
 
-  middleware MyApp.AuthMiddleware
+  # Middleware runs in the order defined
   middleware MyApp.LoggingMiddleware
+  middleware {MyApp.AuthMiddleware, role: :admin}
 
-  dispatch CreateUser, to: UserHandler
+  register CreateUser, handler: UserHandler
 end
 ```
 
-### 3. Send commands
+### 3. Dispatching (Send and Publish)
+
+You can send commands directly to a router.
 
 ```elixir
-MyApp.Router.send(%CreateUser{name: "John", email: "john@example.com"})
+# Send expects a single handler to process the command
+command = %CreateUser{name: "John", email: "john@example.com"}
+
+:ok = MyApp.UserRouter.send(CreateUser, command)
+
+# You can also pass send_opts, such as a custom timeout or correlation_id
+:ok = MyApp.UserRouter.send(CreateUser, command, timeout: 5000)
 ```
 
-### 4. Publish events
-
-Events can be dispatched to multiple handlers concurrently:
+Events can be published to multiple handlers registered to the same struct.
 
 ```elixir
-defmodule MyApp.PublishRouter do
-  use Ming.PublishRouter, otp_app: :my_app, max_concurrency: 5
+defmodule MyApp.EventRouter do
+  use Ming.Router
 
-  publish UserCreated, to: UserProjection
-  publish UserCreated, to: EmailNotifier
+  register UserCreated, handler: UserProjection
+  register UserCreated, handler: EmailNotifier
+end
+
+# Publish executes all registered handlers
+MyApp.EventRouter.publish(UserCreated, %UserCreated{id: 123})
+
+# Publish in parallel executes all registered handlers concurrently
+MyApp.EventRouter.publish(UserCreated, %UserCreated{id: 123}, dispatch_strategy: :parallel)
+```
+
+### 4. Aggregating Routers with CommandProcessor
+
+For larger applications, you can aggregate multiple routers into a single entry point using a `CommandProcessor`. This builds a compile-time lookup table to automatically forward payloads to the correct underlying router.
+
+```elixir
+defmodule MyApp.CommandProcessor do
+  use Ming.CommandProcessor
+
+  router MyApp.UserRouter
+  router MyApp.EventRouter
+end
+
+# The processor automatically routes to UserRouter based on the struct
+MyApp.CommandProcessor.send(%CreateUser{name: "Jane"})
+
+# You can also use a custom routing key via opts
+MyApp.CommandProcessor.send(%{payload: "data"}, routing_key: :custom_key)
+
+# Similarly, publish supports passing options like `dispatch_strategy`
+MyApp.CommandProcessor.publish(%UserCreated{id: 123}, dispatch_strategy: :parallel)
+```
+
+## Middleware Pipeline
+
+Ming's middleware engine acts very much like Elixir's `Plug`. Middlewares implement the `Ming.Middleware` behaviour and receive the `Ming.Context`.
+
+You can modify the context, share data between middlewares using `Context.assign/3`, or stop execution entirely using `Context.halt/1`.
+
+```elixir
+defmodule MyApp.LoggingMiddleware do
+  @behaviour Ming.Middleware
+
+  def before_handle(context) do
+    IO.puts("Starting execution for #{context.routing_key}")
+    context
+  end
+
+  def after_handle(context) do
+    IO.puts("Finished execution. Halted? #{context.halted?}")
+    context
+  end
 end
 ```
 
-### 5. Execute queries
+## Telemetry & Logging
 
-```elixir
-defmodule MyApp.QueryRouter do
-  use Ming.QueryRouter, otp_app: :my_app
+Ming natively integrates with Erlang's `:telemetry` library and standard Elixir `Logger` metadata.
 
-  query GetUserById, to: UserQueryHandler
-end
-```
+### Telemetry Events
 
-## Architecture
+Ming wraps the execution of the dispatcher in a `span`, emitting the following events:
 
-Ming follows a layered architecture:
+* `[:ming, :dispatch, :start]` - Emitted when dispatch begins.
+* `[:ming, :dispatch, :stop]` - Emitted when dispatch completes successfully. Includes calculated `duration`.
+* `[:ming, :dispatch, :exception]` - Emitted if the pipeline raises an unhandled exception.
 
-1. **Router** (`Ming.Router`) - Unified command, event, and query routing
-2. **Send/Publish/Query Routers** (`Ming.SendRouter`, `Ming.PublishRouter`, `Ming.QueryRouter`) - Specialized routing
-3. **Composite Routers** (`Ming.CompositeRouter`, `Ming.SendCompositeRouter`, `Ming.PublishCompositeRouter`, `Ming.QueryCompositeRouter`) - Aggregate multiple routers
-4. **CommandProcessor** (`Ming.CommandProcessor`) - Top-level command processing interface
-5. **Dispatcher** (`Ming.Dispatcher`) - Core dispatching mechanism with middleware pipeline
-6. **Pipeline** (`Ming.Pipeline`) - Middleware pipeline management
+All events include metadata such as `routing_key`, `handler`, `request_id`, and `correlation_id`.
 
-## Middleware
+### Structured Logging
 
-Middleware modules implement the `Ming.Middleware` behaviour and can intercept the pipeline at three stages:
-
-- `before_dispatch/2` - Before handler execution
-- `after_dispatch/2` - After successful handler execution
-- `after_failure/2` - After handler failure
-
-Middleware can be registered as a bare module or with options:
-
-```elixir
-middleware MyApp.AuthMiddleware
-middleware {MyApp.LoggingMiddleware, level: :info}
-```
-
-## Telemetry
-
-Ming emits the following telemetry events:
-
-### Dispatch telemetry
-
-- `[:ming, :application, :dispatch, :start]` - Dispatch started
-- `[:ming, :application, :dispatch, :stop]` - Dispatch completed
-
-Metadata includes `:application`, `:execution_context`, `:dispatcher_type` (`:command`, `:event`, `:query`), and `:error` on failure.
-
-### Handler telemetry
-
-- `[:ming, :handler, :execute, :start]` - Handler execution started
-- `[:ming, :handler, :execute, :stop]` - Handler execution completed
-- `[:ming, :handler, :execute, :exception]` - Handler raised an exception
+If an execution timeout occurs or a pipeline crashes, Ming automatically logs the error via `Logger` using standard keyword list metadata:
+`[ming_routing_key: ..., ming_handler: ..., ming_request_id: ..., crash_reason: ...]`
 
 ## Used in production?
 

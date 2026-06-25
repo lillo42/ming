@@ -1,39 +1,99 @@
 defmodule Ming.CommandProcessorTest do
   use ExUnit.Case
 
-  describe "send/2 through command processor" do
-    test "dispatches registered command" do
-      resp = Ming.CustomCommandProcessor.send(%Ming.ExampleCommand1{})
-      assert resp == :ok
+  defmodule CommandOne do
+    defstruct [:val]
+  end
+
+  defmodule CommandTwo do
+    defstruct [:val]
+  end
+
+  defmodule EventOne do
+    defstruct [:val]
+  end
+
+  defmodule EventTwo do
+    defstruct [:val]
+  end
+
+  defmodule MyHandler do
+    def handle(%CommandOne{val: val}, _ctx), do: {:ok, val}
+    def handle(%CommandTwo{}, _ctx), do: :ok
+    def handle(%EventOne{val: val}, _ctx), do: {:ok, val}
+    def handle(%EventTwo{}, _ctx), do: :ok
+    def handle(%{payload: val}, _ctx), do: {:ok, val}
+  end
+
+  defmodule RouterOne do
+    use Ming.Router
+    register(CommandOne, handler: MyHandler)
+    register(EventOne, handler: MyHandler)
+    register(:atom_key_one, handler: MyHandler)
+  end
+
+  defmodule RouterTwo do
+    use Ming.Router
+    register(CommandTwo, handler: MyHandler)
+    register(EventTwo, handler: MyHandler)
+    # Same event handled in both routers
+    register(EventOne, handler: MyHandler)
+    register(:atom_key_two, handler: MyHandler)
+  end
+
+  defmodule MyProcessor do
+    use Ming.CommandProcessor
+
+    router(RouterOne)
+    router(RouterTwo)
+  end
+
+  describe "send/2" do
+    test "routes command to the correct router" do
+      assert {:ok, 42} = MyProcessor.send(%CommandOne{val: 42})
+      assert :ok = MyProcessor.send(%CommandTwo{})
+    end
+
+    test "routes command with routing_key in opts" do
+      assert {:ok, 10} = MyProcessor.send(%{payload: 10}, routing_key: :atom_key_one)
+      assert {:ok, 20} = MyProcessor.send(%{payload: 20}, routing_key: :atom_key_two)
     end
 
     test "returns unregistered for unknown command" do
-      resp = Ming.CustomCommandProcessor.send(%Ming.ExampleCommand2{})
-      assert resp == {:error, :unregistered_command}
+      assert {:error, :unregistered_command} = MyProcessor.send(%{__struct__: UnknownCommand})
+    end
+
+    test "returns more_than_one_handler_found when routers conflict" do
+      # Note: this is actually an Event handled as a Command but if we registered the same
+      # command twice it would fail similarly. We can just test send with EventOne which has two routers.
+      assert {:error, :more_than_one_handler_found} = MyProcessor.send(%EventOne{})
     end
   end
 
-  describe "publish/2 through command processor" do
-    test "publishes registered event" do
-      resp = Ming.CustomCommandProcessor.publish(%Ming.ExampleEvent1{})
-      assert resp == :ok
+  describe "publish/2" do
+    test "publishes event to a single router" do
+      assert :ok = MyProcessor.publish(%EventTwo{})
     end
 
-    test "returns ok for unregistered event" do
-      resp = Ming.CustomCommandProcessor.publish(%Ming.ExampleCommand2{})
-      assert resp == :ok
-    end
-  end
-
-  describe "query/2 through command processor" do
-    test "queries registered query" do
-      resp = Ming.CustomCommandProcessor.query(%Ming.ExampleCommand1{})
-      assert resp == :ok
+    test "publishes event correctly when using an atom routing key" do
+      assert {:ok, 30} = MyProcessor.publish(%{payload: 30}, :atom_key_one)
+      assert {:ok, 40} = MyProcessor.publish(%{payload: 40}, :atom_key_two)
     end
 
-    test "returns unregistered for unknown query" do
-      resp = Ming.CustomCommandProcessor.query(%Ming.ExampleCommand2{})
-      assert resp == {:error, :unregistered_query}
+    test "publishes event with routing_key in opts" do
+      assert {:ok, 30} = MyProcessor.publish(%{payload: 30}, routing_key: :atom_key_one)
+      assert {:ok, 40} = MyProcessor.publish(%{payload: 40}, routing_key: :atom_key_two)
+    end
+
+    test "publishes event sequentially to multiple routers by default" do
+      # Both RouterOne and RouterTwo handle EventOne.
+      assert [{:ok, 100}, {:ok, 100}] = MyProcessor.publish(%EventOne{val: 100})
+    end
+
+    test "publishes event in parallel" do
+      results = MyProcessor.publish(%EventOne{val: 99}, dispatch_strategy: :parallel)
+      assert length(results) == 2
+      assert {:ok, 99} in results
     end
   end
 end

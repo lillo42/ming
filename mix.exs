@@ -2,19 +2,19 @@ defmodule Ming.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/lillo42/ming"
-  @version "0.1.2"
+  @version "0.2.0"
 
   def project do
     [
       app: :ming,
       version: @version,
-      elixir: "~> 1.18",
+      elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       consolidate_protocols: Mix.env() != :test,
 
       # Hex
-      description: "A toolkit for building messagin apps for Elixir",
+      description: "A toolkit for building messaging apps for Elixir",
       package: package(),
 
       # Docs
