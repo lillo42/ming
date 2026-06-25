@@ -128,7 +128,7 @@ defmodule Ming.Dispatcher do
       handler: context.handler,
       pid: self(),
       request_id: context.id,
-      request_correlation_id: context.correlation_id,
+      correlation_id: context.correlation_id,
       routing_key: context.routing_key,
       timeout: context.timeout
     }
@@ -139,7 +139,7 @@ defmodule Ming.Dispatcher do
       handler: context.handler,
       pid: self(),
       request_id: context.id,
-      request_correlation_id: context.correlation_id,
+      correlation_id: context.correlation_id,
       routing_key: context.routing_key,
       timeout: context.timeout
     ]
