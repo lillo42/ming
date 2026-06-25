@@ -88,10 +88,8 @@ defmodule Ming.DispatcherTest do
       result = Dispatcher.dispatch(context)
       assert Context.halted?(result)
       assert Context.response(result) == {:error, :halted}
-      # after_handle should NOT be called for CustomMiddleware because the chain halts before it
-      # actually wait, it halts DURING before_handle of CustomMiddleware, so after_handle is
-      # skipped for subsequent but what about itself?
-      refute Map.has_key?(result.assigns, :after_called)
+      # CustomMiddleware's after_handle IS called even when the pipeline halts
+      assert result.assigns.after_called == true
     end
 
     test "executes with timeout successfully", %{context: context} do

@@ -17,7 +17,7 @@ defmodule Ming.Dispatcher do
   * `:handler` - The module handling the request
   * `:pid` - The PID of the process executing the pipeline
   * `:request_id` - The unique ID of the request
-  * `:request_correlation_id` - The correlation ID of the request
+  * `:correlation_id` - The correlation ID of the request
   * `:routing_key` - The routing key used
   * `:timeout` - The configured timeout
   """
@@ -104,10 +104,14 @@ defmodule Ming.Dispatcher do
 
       context = middleware.before_handle(context)
 
+      # Always include the current middleware in the after-chain,
+      # even if it halts, so its after_handle is unwound.
+      middlewares = [middleware | middlewares]
+
       if Context.halted?(context) do
         {:halt, {context, middlewares}}
       else
-        {:cont, {context, [middleware | middlewares]}}
+        {:cont, {context, middlewares}}
       end
     end)
   end

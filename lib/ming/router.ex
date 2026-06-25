@@ -164,11 +164,6 @@ defmodule Ming.Router do
         Dispatcher.dispatch(context)
         |> Context.response()
       end
-
-      defp resolve_routing_key(opts, request) when is_struct(request),
-        do: Keyword.get(opts, :routing_key, request.__struct__)
-
-      defp resolve_routing_key(opts, request), do: Keyword.fetch!(opts, :routing_key)
     end
   end
 end

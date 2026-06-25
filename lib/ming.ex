@@ -22,7 +22,8 @@ defmodule Ming do
   @type id :: UUIDv7.t() | String.t() | binary()
 
   @typedoc """
-  Options allowed when sending a command.
+  Options allowed when sending a command via `Ming.CommandProcessor`.
+  For `Ming.Router`, the routing key is a positional argument.
   """
   @type send_opts ::
           {:id, id()}

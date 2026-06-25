@@ -41,7 +41,7 @@ end
 defmodule UserHandler do
   @behaviour Ming.Handler
 
-  def execute(%Ming.Context{request: %CreateUser{}} = context) do
+  def handle(%CreateUser{}, %Ming.Context{} = context) do
     # Business logic here
     # ...
     Ming.Context.respond(context, :ok)
@@ -73,10 +73,10 @@ You can send commands directly to a router.
 # Send expects a single handler to process the command
 command = %CreateUser{name: "John", email: "john@example.com"}
 
-:ok = MyApp.UserRouter.send(command)
+:ok = MyApp.UserRouter.send(CreateUser, command)
 
 # You can also pass send_opts, such as a custom timeout or correlation_id
-:ok = MyApp.UserRouter.send(command, timeout: 5000)
+:ok = MyApp.UserRouter.send(CreateUser, command, timeout: 5000)
 ```
 
 Events can be published to multiple handlers registered to the same struct.
@@ -90,10 +90,10 @@ defmodule MyApp.EventRouter do
 end
 
 # Publish executes all registered handlers
-MyApp.EventRouter.publish(%UserCreated{id: 123})
+MyApp.EventRouter.publish(UserCreated, %UserCreated{id: 123})
 
 # Publish in parallel executes all registered handlers concurrently
-MyApp.EventRouter.publish(%UserCreated{id: 123}, dispatch_strategy: :parallel)
+MyApp.EventRouter.publish(UserCreated, %UserCreated{id: 123}, dispatch_strategy: :parallel)
 ```
 
 ### 4. Aggregating Routers with CommandProcessor
@@ -128,12 +128,12 @@ You can modify the context, share data between middlewares using `Context.assign
 defmodule MyApp.LoggingMiddleware do
   @behaviour Ming.Middleware
 
-  def before_handle(context, _opts) do
+  def before_handle(context) do
     IO.puts("Starting execution for #{context.routing_key}")
     context
   end
 
-  def after_handle(context, _opts) do
+  def after_handle(context) do
     IO.puts("Finished execution. Halted? #{context.halted?}")
     context
   end
