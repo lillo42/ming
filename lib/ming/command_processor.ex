@@ -48,7 +48,7 @@ defmodule Ming.CommandProcessor do
           end
         else
           quote do
-            defp do_send(unquote(routing_key), _request, _opts),
+            defp do_send(unquote(routing_key), _command, _opts),
               do: {:error, :more_than_one_handler_found}
           end
         end
@@ -82,20 +82,16 @@ defmodule Ming.CommandProcessor do
       @doc """
       Routes a command to the corresponding router for execution.
       """
-      @spec send(any(), keyword(Ming.send_opts()) | timeout() | Ming.routing_key()) :: Ming.resp()
+      @spec send(any(), keyword(Ming.send_opts()) | Ming.routing_key()) :: Ming.resp()
       def send(command, opts \\ [])
-
-      def send(command, :infinity) when is_struct(command),
-        do: do_send(command.__struct__, command, timeout: :infinity)
-
-      def send(command, timeout) when is_struct(command) and is_integer(timeout),
-        do: do_send(command.__struct__, command, timeout: timeout)
 
       def send(command, routing_key) when is_atom(routing_key),
         do: do_send(routing_key, command, [])
 
-      def send(command, opts),
-        do: do_send(resolve_routing_key(opts, command), command, opts)
+      def send(command, opts) when is_list(opts) do
+        routing_key = resolve_routing_key(opts, command)
+        do_send(routing_key, command, opts)
+      end
 
       unquote(send_clauses)
       defp do_send(_routing_key, _request, _opts), do: {:error, :unregistered_command}
@@ -103,21 +99,17 @@ defmodule Ming.CommandProcessor do
       @doc """
       Routes an event to all corresponding routers for execution.
       """
-      @spec publish(any(), keyword(Ming.publish_opts()) | timeout() | Ming.routing_key()) ::
+      @spec publish(any(), keyword(Ming.publish_opts()) | Ming.routing_key()) ::
               Ming.resp() | [Ming.resp()]
       def publish(event, opts \\ [])
-
-      def publish(event, :infinity) when is_struct(event),
-        do: do_publish(event.__struct__, event, timeout: :infinity)
-
-      def publish(event, timeout) when is_struct(event) and is_integer(timeout),
-        do: do_publish(event.__struct__, event, timeout: timeout)
 
       def publish(event, routing_key) when is_atom(routing_key),
         do: do_publish(routing_key, event, [])
 
-      def publish(event, opts),
-        do: do_publish(resolve_routing_key(opts, event), event, opts)
+      def publish(event, opts) when is_list(opts) do
+        routing_key = resolve_routing_key(opts, event)
+        do_publish(routing_key, event, opts)
+      end
 
       unquote(publish_clauses)
       defp do_publish(_routing_key, _request, _opts), do: {:error, :unregistered_command}

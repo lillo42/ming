@@ -23,7 +23,7 @@ defmodule Ming.Middleware.CallHandler do
         Context.respond(context, :ok)
 
       nil ->
-        Context.respond(context, :ok)
+        Context.respond(context, {:ok, nil})
 
       {:error, reason} ->
         Context.respond(context, {:error, reason})
