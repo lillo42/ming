@@ -12,7 +12,7 @@ defmodule Ming.Message.Middleware.RequestToMessage do
   @behaviour Ming.Middleware
 
   @impl Ming.Middleware
-  def before_handle(%Context{assigns: %{ming_mapper: mapper}, request: request} = context) do
+  def before_handle(%Context{assigns: %{mapper: mapper}, request: request} = context) do
     case mapper.to_message(request, context) do
       %Message{} = message ->
         %Context{context | request: message}

@@ -14,7 +14,14 @@ if Code.ensure_loaded?(AMQP) do
     configured command processor. The AMQP delivery is acknowledged,
     rejected, or requeued depending on the handler result.
     """
-    @spec process(atom(), AMQP.Channel.t(), integer(), Ming.routing_key(), Ming.Message.t(), timeout()) ::
+    @spec process(
+            atom(),
+            AMQP.Channel.t(),
+            integer(),
+            Ming.routing_key(),
+            Ming.Message.t(),
+            timeout()
+          ) ::
             :ok | {:error, any()}
     def process(name, channel, delivery_tag, routing_key, message, timeout) do
       NimblePool.checkout!(name, :process, fn _ref, command_process ->
@@ -54,8 +61,8 @@ if Code.ensure_loaded?(AMQP) do
     end
 
     @impl NimblePool
-    def handle_checkin(:ok, _from, _worker_state, pool_state) do
-      {:ok, pool_state}
+    def handle_checkin(:ok, _from, worker_state, pool_state) do
+      {:ok, worker_state, pool_state}
     end
 
     def handle_checkin({:error, _reason}, _from, _worker_state, pool_state) do

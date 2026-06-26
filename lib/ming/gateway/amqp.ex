@@ -38,7 +38,9 @@ if Code.ensure_loaded?(AMQP) do
     alias Ming.Gateway.AMQP.MessageProcess
     alias Ming.Gateway.AMQP.Publisher
 
-    @typedoc """Options for connecting to an AMQP broker."""
+    @typedoc """
+    Options for connecting to an AMQP broker.
+    """
     @type connection ::
             {:uri, String.t() | URI.t() | nil}
             | {:username, String.t() | nil}
@@ -56,7 +58,9 @@ if Code.ensure_loaded?(AMQP) do
             | {:auth_mechanisms, any() | nil}
             | {:name, String.t() | nil}
 
-    @typedoc """Supported AMQP exchange types."""
+    @typedoc """
+    Supported AMQP exchange types.
+    """
     @type exchange_type :: :direct | :fanout | :topic | :headers
 
     @doc """
@@ -80,7 +84,11 @@ if Code.ensure_loaded?(AMQP) do
       children =
         [{Connection, connection_config}]
         |> publication(name, Keyword.get(config, :publications, []))
-        |> subscriptions(name, Keyword.fetch!(args, :command_process), Keyword.get(config, :subscriptions, []))
+        |> subscriptions(
+          name,
+          Keyword.fetch!(args, :command_process),
+          Keyword.get(config, :subscriptions, [])
+        )
 
       Supervisor.init(children, strategy: :one_for_one)
     end
@@ -172,7 +180,6 @@ if Code.ensure_loaded?(AMQP) do
     defp ensure_exchange_exists(val, nil), do: val
 
     defp ensure_exchange_exists({:error, reason}, _exchange), do: {:error, reason}
-    defp ensure_exchange_exists({:error, reason, conn}, _exchange), do: {:error, reason, conn}
 
     defp ensure_exchange_exists({:error, reason, conn, channel}, _exchange),
       do: {:error, reason, conn, channel}
@@ -222,9 +229,6 @@ if Code.ensure_loaded?(AMQP) do
     defp ensure_queues_exists(val, [], _exchange), do: val
 
     defp ensure_queues_exists({:error, reason}, _subscriptions, _exchange), do: {:error, reason}
-
-    defp ensure_queues_exists({:error, reason, conn}, _subscriptions, _exchange),
-      do: {:error, reason, conn}
 
     defp ensure_queues_exists({:error, reason, conn, channel}, _subscriptions, _exchange),
       do: {:error, reason, conn, channel}

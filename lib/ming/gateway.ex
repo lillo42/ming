@@ -13,4 +13,6 @@ defmodule Ming.Gateway do
   Called synchronously by `Ming.Gateway.Supervisor` during init.
   """
   @callback provision_infrastructure(args :: keyword()) :: :ok | {:error, any()}
+
+  @callback producer() :: module()
 end

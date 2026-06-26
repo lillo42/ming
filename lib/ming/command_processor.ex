@@ -9,13 +9,19 @@ defmodule Ming.CommandProcessor do
   @doc """
   Injects router aggregation macros.
   """
-  defmacro __using__(_opts) do
+  defmacro __using__(opts) do
+    default_message_mapper = Keyword.get(opts, :default_message_mapper, Ming.Message.Mapper.JSON)
+
     quote do
       import unquote(__MODULE__)
 
       @before_compile unquote(__MODULE__)
 
+      @default_message_mapper unquote(default_message_mapper)
+
       Module.register_attribute(__MODULE__, :routers, accumulate: true)
+
+      @routers Ming.Message.Router
     end
   end
 
@@ -113,6 +119,31 @@ defmodule Ming.CommandProcessor do
 
       unquote(publish_clauses)
       defp do_publish(_routing_key, _request, _opts), do: {:error, :unregistered_command}
+
+      def post(request, opts \\ [])
+
+      def post(request, routing_key) when is_atom(routing_key) do
+        do_post(request, routing_key: routing_key)
+      end
+
+      def post(request, opts) do
+        opts = Keyword.put_new(opts, :routing_key, resolve_routing_key(opts, request))
+        do_post(request, opts)
+      end
+
+      defp do_post(request, opts) do
+        metadata =
+          Keyword.get(opts, :metadata, %{})
+          |> Map.put(:message_routing_key, Keyword.fetch!(opts, :routing_key))
+          |> Map.put(:default_message_mapper, @default_message_mapper)
+
+        opts =
+          opts
+          |> Keyword.put(:metadata, metadata)
+          |> Keyword.put(:routing_key, :ming_message)
+
+        send(request, opts)
+      end
 
       defp resolve_routing_key(opts, request) when is_struct(request),
         do: Keyword.get(opts, :routing_key, request.__struct__)

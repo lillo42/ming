@@ -118,7 +118,11 @@ if Code.ensure_loaded?(AMQP) do
         parse_headers(Map.get(metadata, :headers))
         |> Map.put(:amqp_metadata, metadata)
 
-      id = Map.get(headers, "cloudEvents:id") || Map.get(metadata, :message_id, UUIDv7.generate())
+      message_id =
+        Map.get(headers, "cloudEvents:id") || Map.get(metadata, :message_id, UUIDv7.generate())
+
+      timestamp =
+        parse_timestamp(Map.get(headers, "cloudEvents:time") || Map.get(metadata, :timestamp))
 
       %Message{
         id: message_id,
@@ -134,8 +138,7 @@ if Code.ensure_loaded?(AMQP) do
         spec_version: Map.get(headers, "cloudEvents:specversion", "1.0"),
         source: parse_uri(Map.get(headers, "cloudEvents:source", "https://hex.pm/packages/ming")),
         subject: Map.get(headers, "cloudEvents:subject"),
-        timestamp:
-          parse_timestamp(Map.get(headers, "cloudEvents:time") || Map.get(metadata, :timestamp)),
+        timestamp: timestamp,
         trace_parent: Map.get(headers, "cloudEvents:traceparent"),
         trace_state: TraceState.from_string(Map.get(headers, "cloudEvents:tracestate")),
         type: Map.get(headers, "cloudEvents:type")
@@ -189,7 +192,7 @@ if Code.ensure_loaded?(AMQP) do
 
     defp parse_timestamp(val) when is_binary(val) do
       case DateTime.from_iso8601(val) do
-        {:ok, datetime} ->
+        {:ok, datetime, _calendar} ->
           datetime
 
         {:error, _reason} ->
@@ -197,10 +200,9 @@ if Code.ensure_loaded?(AMQP) do
       end
     end
 
-    defp parse_uri(nil, default \\ nil)
-    defp parse_uri(nil, default), do: default
+    defp parse_uri(nil), do: nil
 
-    defp parse_uri(val, default) do
+    defp parse_uri(val) do
       case URI.new(val) do
         {:ok, uri} ->
           uri

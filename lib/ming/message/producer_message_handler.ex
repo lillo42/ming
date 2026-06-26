@@ -1,4 +1,4 @@
-defmodule Ming.Message.Handler do
+defmodule Ming.Message.ProducerMessageHandler do
   @moduledoc """
   Handler that publishes a %Ming.Message{} via a configured producer.
 
@@ -16,16 +16,16 @@ defmodule Ming.Message.Handler do
   def handle(
         %Message{} = request,
         %Context{
-          assigns:
-            %{
-              ming_message_producer: producer,
-              ming_message_gateway: gateway,
-              ming_message_publication: publication
-            } = assigns,
+          assigns: %{
+            gateway: gateway,
+            publication: publication
+          },
           metadata: metadata
         }
       ) do
     extra_opts = Map.get(metadata, :producer_opts, [])
+
+    producer = gateway.producer()
 
     producer.publish(request,
       gateway: gateway,

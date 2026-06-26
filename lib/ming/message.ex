@@ -15,7 +15,7 @@ defmodule Ming.Message do
           data_schema: URI.t() | String.t() | nil,
           data_ref: URI.t() | String.t() | nil,
           headers: map(),
-          partition_key: String.() | atom() | nil,
+          partition_key: String.t() | atom() | nil,
           payload: :binary,
           reply_to: URI.t() | String.t() | nil,
           source: URI.t() | String.t(),
@@ -23,6 +23,7 @@ defmodule Ming.Message do
           subject: String.t() | nil,
           trace_parent: String.t() | nil,
           trace_state: map() | nil,
+          timestamp: DateTime.t(),
           type: String.t() | atom()
         }
 
@@ -34,7 +35,6 @@ defmodule Ming.Message do
     :correlation_id,
     :data_schema,
     :data_ref,
-    :headers,
     :partition_key,
     :payload,
     :reply_to,
@@ -46,6 +46,7 @@ defmodule Ming.Message do
     :timestamp,
     :type,
     content_type: "text/plain",
+    headers: %{},
     spec_version: "1.0"
   ]
 
