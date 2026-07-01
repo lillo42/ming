@@ -89,7 +89,8 @@ if Code.ensure_loaded?(AMQP) do
       {:stop, :stopped_by_client, state}
     end
 
-    def handle_info({:basic_deliver, payload, metadata},
+    def handle_info(
+          {:basic_deliver, payload, metadata},
           %{
             channel: channel,
             name: name,

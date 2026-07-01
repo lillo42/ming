@@ -28,14 +28,14 @@ if Code.ensure_loaded?(AMQP) do
     @spec get_connection!(atom() | pid()) :: AMQP.Connection.t()
     def get_connection!(name) do
       conn = GenServer.call(name, :get_connection)
-      
+
       if Process.alive?(conn.pid) do
         conn
       else
         # Connection is stale, wait for restart and retry once
         Process.sleep(100)
         conn = GenServer.call(name, :get_connection)
-        
+
         if Process.alive?(conn.pid) do
           conn
         else
