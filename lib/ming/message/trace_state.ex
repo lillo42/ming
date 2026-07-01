@@ -6,6 +6,14 @@ defmodule Ming.Message.TraceState do
   propagating trace context across message boundaries.
   """
 
+  @doc """
+  Serializes a tracestate map into a comma-separated `key=value` string.
+
+  Returns `nil` when given `nil`, and returns the value unchanged when it
+  is not a map.
+  """
+  def to_string(val)
+
   def to_string(nil), do: nil
 
   def to_string(val) when is_map(val) do
@@ -15,6 +23,13 @@ defmodule Ming.Message.TraceState do
   end
 
   def to_string(val), do: val
+
+  @doc """
+  Parses a W3C tracestate header string into a map.
+
+  Malformed key-value pairs (those without exactly one `=`) are ignored.
+  """
+  def from_string(val)
 
   def from_string(nil), do: %{}
   def from_string(""), do: %{}

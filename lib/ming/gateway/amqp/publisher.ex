@@ -11,6 +11,7 @@ if Code.ensure_loaded?(AMQP) do
     alias AMQP.Channel
 
     alias Ming.Gateway.AMQP.Connection
+    alias Ming.Gateway.RetryConfig
 
     @behaviour NimblePool
 
@@ -30,24 +31,50 @@ if Code.ensure_loaded?(AMQP) do
     def init_pool(args) do
       name = Keyword.fetch!(args, :gateway_name)
       conn = Connection.get_connection!(name)
+      retry_config = RetryConfig.new(Keyword.get(args, :retry, []))
 
-      {:ok, %{connection: conn, publication: args}}
+      {:ok,
+       %{connection: conn, gateway_name: name, retry_config: retry_config, publication: args}}
     end
 
     @impl NimblePool
-    def init_worker(%{connection: conn} = state) do
+
+    def init_worker(state), do: do_init_worker(state, 0)
+
+    defp do_init_worker(
+           %{connection: conn, gateway_name: name, retry_config: retry} = state,
+           attempt
+         ) do
       case Channel.open(conn) do
         {:ok, channel} ->
           {:ok, %{channel: channel, last_usage: DateTime.utc_now()}, state}
 
-        {:error, reason} ->
-          {:remove, {:channel_open_failed, reason}}
+        {:error, _reason} when attempt < retry.max_retries ->
+          Process.sleep(RetryConfig.calculate_delay(retry, attempt))
+          do_init_worker(state, attempt + 1)
+
+        {:error, _reason} ->
+          # Try re-fetching connection (might be stale)
+          fresh_conn = Connection.get_connection!(name)
+
+          if fresh_conn.pid != conn.pid do
+            # Got a new connection, retry with fresh conn
+            do_init_worker(%{state | connection: fresh_conn}, 0)
+          else
+            # Same connection, genuinely failed
+            {:remove, {:channel_open_failed, :max_retries_exceeded}}
+          end
       end
     end
 
     @impl NimblePool
-    def handle_checkout(:publish, _from, %{channel: channel} = worker_state, pool_state) do
-      if Process.alive?(channel.pid) do
+    def handle_checkout(
+          :publish,
+          _from,
+          %{channel: channel} = worker_state,
+          %{connection: conn} = pool_state
+        ) do
+      if Process.alive?(channel.pid) and Process.alive?(conn.pid) do
         {:ok, channel, Map.put(worker_state, :last_usage, DateTime.utc_now()), pool_state}
       else
         {:remove, :dead, pool_state}
@@ -84,7 +111,7 @@ if Code.ensure_loaded?(AMQP) do
       if timeout == :infinity or DateTime.diff(now, last_usage, :millisecond) < timeout do
         {:ok, worker_state}
       else
-        {:remove, :idle_timeout}
+        {:remove, worker_state}
       end
     end
   end

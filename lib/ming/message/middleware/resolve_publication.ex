@@ -1,9 +1,29 @@
-defmodule Ming.Message.Middleware.SetGatewayPublication do
+defmodule Ming.Message.Middleware.ResolvePublication do
+  @moduledoc """
+  Middleware that resolves the gateway, publication, and mapper for a
+  message routing key.
+
+  It looks up the configured `:ming` application gateways and selects the
+  single publication matching `metadata.message_routing_key`. The selected
+  gateway, publication, and mapper are stored in the context assigns for
+  downstream middleware.
+  """
+
   alias Ming.Context
 
   @behaviour Ming.Middleware
 
+  @doc """
+  Finds the unique publication for the current routing key.
+
+  Halts with `{:error, {:publication_not_found, routing_key}}` if none is
+  found, or `{:error, {:multi_publication_found, routing_key, total}}` if
+  more than one matches. Halts with `{:error, :invalid_context}` when the
+  required routing key metadata is missing.
+  """
   @impl Ming.Middleware
+  def before_handle(context)
+
   def before_handle(
         %Context{
           metadata: %{
@@ -18,7 +38,7 @@ defmodule Ming.Message.Middleware.SetGatewayPublication do
       gateways
       |> Stream.flat_map(fn gateway ->
         gateway
-        |> Keyword.get(:publication, [])
+        |> Keyword.get(:publications, [])
         |> Enum.map(&{gateway, &1})
       end)
       |> Stream.filter(fn {_gateway, publication} ->
@@ -40,8 +60,9 @@ defmodule Ming.Message.Middleware.SetGatewayPublication do
             Keyword.get(gateway, :mapper, default_message_mapper)
 
         context
-        |> Context.assign(:gateway, gateway)
+        |> Context.assign(:gateway, Keyword.fetch!(gateway, :adapter))
         |> Context.assign(:publication, publication)
+        |> Context.assign(:ming_message_publication, publication)
         |> Context.assign(:mapper, mapper)
 
       total ->
@@ -57,6 +78,9 @@ defmodule Ming.Message.Middleware.SetGatewayPublication do
     |> Context.respond({:error, :invalid_context})
   end
 
+  @doc """
+  No-op after stage.
+  """
   @impl Ming.Middleware
   def after_handle(context), do: context
 end

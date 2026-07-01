@@ -14,15 +14,21 @@ if Code.ensure_loaded?(AMQP) do
         [
           adapter: Ming.Gateway.AMQP,
           name: :my_amqp,
-          config: [
-            connection: [uri: "amqp://guest:guest@localhost"],
-            exchange: [name: "events", type: :topic],
-            publications: [
-              [routing_key: :order_created, number_of_performers: 2]
-            ],
-            subscriptions: [
-              [name: :orders, topic_or_queue: "orders.queue", routing_key: :order_created]
-            ]
+          command_processor: MyApp.CommandProcessor,
+          connection: [
+            uri: "amqp://guest:guest@localhost",
+            retry: [max_retries: 5, base_delay: 1_000]
+          ],
+          exchange: [
+            name: "events",
+            type: :topic,
+            provision: :create
+          ],
+          publications: [
+            [routing_key: :order_created, number_of_performers: 2]
+          ],
+          subscriptions: [
+            [name: :orders, topic_or_queue: "orders.queue", routing_key: :order_created]
           ]
         ]
     """
@@ -73,21 +79,22 @@ if Code.ensure_loaded?(AMQP) do
 
     @impl true
     def init(args) do
-      config = Keyword.fetch!(args, :config)
-      name = Keyword.get(config, :name, __MODULE__)
+      name = Keyword.get(args, :name, __MODULE__)
+      connection_name = :"#{name}_connection"
 
       connection_config =
-        config
+        args
         |> Keyword.fetch!(:connection)
-        |> Keyword.put_new(:name, name)
+        |> Keyword.put_new(:name, connection_name)
+        |> Keyword.put_new(:retry, [])
 
       children =
         [{Connection, connection_config}]
-        |> publication(name, Keyword.get(config, :publications, []))
+        |> publication(name, Keyword.get(args, :publications, []))
         |> subscriptions(
           name,
-          Keyword.fetch!(args, :command_process),
-          Keyword.get(config, :subscriptions, [])
+          Keyword.fetch!(args, :command_processor),
+          Keyword.get(args, :subscriptions, [])
         )
 
       Supervisor.init(children, strategy: :one_for_one)
@@ -104,7 +111,11 @@ if Code.ensure_loaded?(AMQP) do
           lazy: Keyword.get(publication, :lazy, false),
           idle_timeout: Keyword.get(publication, :idle_timeout, :infinity),
           max_idle_pings: Keyword.get(publication, :idle_pings, :infinity),
-          worker: {Publisher, Keyword.put(publication, :gateway_name, gateway_name)}
+          worker:
+            {Publisher,
+             publication
+             |> Keyword.put(:gateway_name, gateway_name)
+             |> Keyword.put_new(:retry, [])}
         }
         | publication(acc, gateway_name, next)
       ]
@@ -133,6 +144,10 @@ if Code.ensure_loaded?(AMQP) do
     end
 
     @behaviour Ming.Gateway
+
+    @impl Ming.Gateway
+    def producer(), do: Ming.Gateway.AMQP.Producer
+
     @doc """
     Provisions AMQP infrastructure (exchanges, queues, bindings) before the gateway starts.
 
@@ -140,16 +155,15 @@ if Code.ensure_loaded?(AMQP) do
     """
     @impl Ming.Gateway
     def provision_infrastructure(args) do
-      config = Keyword.fetch!(args, :config)
-      connection = Keyword.fetch!(config, :connection)
+      connection = Keyword.fetch!(args, :connection)
 
-      exchange = Keyword.get(config, :exchange)
+      exchange = Keyword.get(args, :exchange)
       exchange_name = if is_binary(exchange), do: exchange, else: Keyword.fetch!(exchange, :name)
 
       create_connection(connection)
       |> create_channel()
       |> ensure_exchange_exists(exchange)
-      |> ensure_exchange_exists(Keyword.get(config, :dead_letter_exchange))
+      |> ensure_exchange_exists(Keyword.get(args, :dead_letter_exchange))
       |> ensure_queues_exists(Keyword.get(args, :subscriptions, []), exchange_name)
       |> close_channel()
       |> close_conn()
@@ -180,6 +194,9 @@ if Code.ensure_loaded?(AMQP) do
     defp ensure_exchange_exists(val, nil), do: val
 
     defp ensure_exchange_exists({:error, reason}, _exchange), do: {:error, reason}
+
+    defp ensure_exchange_exists({:error, reason, conn, nil}, _exchange),
+      do: {:error, reason, conn, nil}
 
     defp ensure_exchange_exists({:error, reason, conn, channel}, _exchange),
       do: {:error, reason, conn, channel}
@@ -240,7 +257,7 @@ if Code.ensure_loaded?(AMQP) do
 
       with {:ok, _queue} <- ensure_queue_exists(provision, channel, dead_letter_queue),
            {:ok, _queue} <- ensure_queue_exists(provision, channel, queue),
-           :ok <- ensure_queue_is_bind(provision, channel, queue, exchange) do
+           :ok <- ensure_queue_is_bound(provision, channel, queue, exchange) do
         ensure_queues_exists({:ok, conn, channel}, next, exchange)
       else
         {:error, reason} ->
@@ -267,15 +284,15 @@ if Code.ensure_loaded?(AMQP) do
       Queue.declare(channel, queue, passive: false)
     end
 
-    defp ensure_queue_is_bind(:assume, _channel, _queue, _exchange), do: :ok
-    defp ensure_queue_is_bind(:validate, _channel, _queue, _exchange), do: :ok
-    defp ensure_queue_is_bind({:validate, _opts}, _channel, _queue, _exchange), do: :ok
+    defp ensure_queue_is_bound(:assume, _channel, _queue, _exchange), do: :ok
+    defp ensure_queue_is_bound(:validate, _channel, _queue, _exchange), do: :ok
+    defp ensure_queue_is_bound({:validate, _opts}, _channel, _queue, _exchange), do: :ok
 
-    defp ensure_queue_is_bind({_action, opts}, channel, queue, exchange) do
+    defp ensure_queue_is_bound({_action, opts}, channel, queue, exchange) do
       Queue.bind(channel, queue, exchange, opts)
     end
 
-    defp ensure_queue_is_bind(_action, channel, queue, exchange) do
+    defp ensure_queue_is_bound(_action, channel, queue, exchange) do
       Queue.bind(channel, queue, exchange)
     end
 

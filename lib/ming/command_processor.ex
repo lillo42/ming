@@ -10,7 +10,7 @@ defmodule Ming.CommandProcessor do
   Injects router aggregation macros.
   """
   defmacro __using__(opts) do
-    default_message_mapper = Keyword.get(opts, :default_message_mapper, Ming.Message.Mapper.JSON)
+    default_message_mapper = Keyword.get(opts, :default_message_mapper, Ming.Message.Mapper.Json)
 
     quote do
       import unquote(__MODULE__)
@@ -40,7 +40,15 @@ defmodule Ming.CommandProcessor do
 
   @doc false
   defmacro __before_compile__(env) do
-    routers = Module.get_attribute(env.module, :routers) || []
+    routers =
+      env.module
+      |> Module.get_attribute(:routers)
+      |> List.wrap()
+      |> Enum.flat_map(fn
+        {_routing_key, _router} = entry -> [entry]
+        router when is_atom(router) -> Enum.map(router.__register_routing_keys__(), &{&1, router})
+      end)
+
     routing_key_by_module = Enum.group_by(routers, &elem(&1, 0), &elem(&1, 1))
 
     send_clauses =
@@ -140,9 +148,9 @@ defmodule Ming.CommandProcessor do
         opts =
           opts
           |> Keyword.put(:metadata, metadata)
-          |> Keyword.put(:routing_key, :ming_message)
+          |> Keyword.put(:routing_key, :ming_produce_message)
 
-        send(request, opts)
+        __MODULE__.send(request, opts)
       end
 
       defp resolve_routing_key(opts, request) when is_struct(request),

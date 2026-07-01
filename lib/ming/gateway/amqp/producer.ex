@@ -15,7 +15,15 @@ if Code.ensure_loaded?(AMQP) do
 
     @behaviour Ming.Message.Producer
 
+    @doc """
+    Publishes a single `%Ming.Message{}` or a list of messages through the
+    AMQP gateway.
+
+    Options must include `:gateway` and `:publication`.
+    """
     @impl Ming.Message.Producer
+    def publish(messages_or_message, opts)
+
     def publish(messages, opts) when is_list(messages),
       do: Enum.map(messages, &publish(&1, opts))
 
@@ -26,18 +34,18 @@ if Code.ensure_loaded?(AMQP) do
 
       publish_opts =
         []
-        |> put_if_not_nil(:app_id, Keyword.get(gateway, :app_id))
-        |> put_if_not_nil(:content_encoding, Keyword.get(publication, :content_encoding))
-        |> put_if_not_nil(:content_type, message.content_type)
-        |> put_if_not_nil(:correlation_id, message.correlation_id)
-        |> put_if_not_nil(:expiration, Keyword.get(extra_opts, :expiration))
-        |> put_if_not_nil(:immediate, Keyword.get(publication, :immediate))
-        |> put_if_not_nil(:mandatory, Keyword.get(publication, :mandatory))
-        |> put_if_not_nil(:message_id, message.id)
-        |> put_if_not_nil(:persistent, Keyword.get(publication, :persistent))
-        |> put_if_not_nil(:priority, Keyword.get(extra_opts, :priority))
-        |> put_if_not_nil(:reply_to, message.reply_to)
-        |> put_if_not_nil(:timestamp, DateTime.to_unix(message.timestamp))
+        |> put_if_present(:app_id, Keyword.get(gateway, :app_id))
+        |> put_if_present(:content_encoding, Keyword.get(publication, :content_encoding))
+        |> put_if_present(:content_type, message.content_type)
+        |> put_if_present(:correlation_id, message.correlation_id)
+        |> put_if_present(:expiration, Keyword.get(extra_opts, :expiration))
+        |> put_if_present(:immediate, Keyword.get(publication, :immediate))
+        |> put_if_present(:mandatory, Keyword.get(publication, :mandatory))
+        |> put_if_present(:message_id, message.id)
+        |> put_if_present(:persistent, Keyword.get(publication, :persistent))
+        |> put_if_present(:priority, Keyword.get(extra_opts, :priority))
+        |> put_if_present(:reply_to, message.reply_to)
+        |> put_if_present(:timestamp, DateTime.to_unix(message.timestamp))
         |> put_headers(
           message,
           Keyword.get(publication, :default_headers, %{}),
@@ -46,7 +54,6 @@ if Code.ensure_loaded?(AMQP) do
 
       exchange =
         gateway
-        |> Keyword.fetch!(:config)
         |> Keyword.fetch!(:exchange)
         |> Keyword.fetch!(:name)
 
@@ -61,9 +68,10 @@ if Code.ensure_loaded?(AMQP) do
       )
     end
 
-    defp put_if_not_nil(source, _key, nil), do: source
-    defp put_if_not_nil(source, key, val) when is_map(source), do: Map.put(source, key, val)
-    defp put_if_not_nil(source, key, val) when is_list(source), do: Keyword.put(source, key, val)
+    defp put_if_present(source, _key, nil), do: source
+    defp put_if_present(source, _key, ""), do: source
+    defp put_if_present(source, key, val) when is_map(source), do: Map.put(source, key, val)
+    defp put_if_present(source, key, val) when is_list(source), do: Keyword.put(source, key, val)
 
     defp put_headers(opts, %Message{headers: headers}, default_headers, :json) do
       Keyword.put(opts, :headers, to_amqp_headers(Map.merge(default_headers, headers)))
@@ -73,17 +81,17 @@ if Code.ensure_loaded?(AMQP) do
       headers =
         default_headers
         |> Map.merge(headers)
-        |> put_if_not_nil("cloudEvents:id", message.id)
-        |> put_if_not_nil("cloudEvents:baggage", Baggage.to_string(message.baggage))
-        |> put_if_not_nil("cloudEvents:dataref", message.data_ref)
-        |> put_if_not_nil("cloudEvents:dataschema", message.data_schema)
-        |> put_if_not_nil("cloudEvents:specversion", message.spec_version)
-        |> put_if_not_nil("cloudEvents:source", message.source)
-        |> put_if_not_nil("cloudEvents:subject", message.subject)
-        |> put_if_not_nil("cloudEvents:time", DateTime.to_iso8601(message.timestamp))
-        |> put_if_not_nil("cloudEvents:traceparent", message.trace_parent)
-        |> put_if_not_nil("cloudEvents:tracestate", TraceState.to_string(message.trace_state))
-        |> put_if_not_nil("cloudEvents:type", message.type)
+        |> put_if_present("cloudEvents:id", message.id)
+        |> put_if_present("cloudEvents:baggage", Baggage.to_string(message.baggage))
+        |> put_if_present("cloudEvents:dataref", message.data_ref)
+        |> put_if_present("cloudEvents:dataschema", message.data_schema)
+        |> put_if_present("cloudEvents:specversion", message.spec_version)
+        |> put_if_present("cloudEvents:source", message.source)
+        |> put_if_present("cloudEvents:subject", message.subject)
+        |> put_if_present("cloudEvents:time", DateTime.to_iso8601(message.timestamp))
+        |> put_if_present("cloudEvents:traceparent", message.trace_parent)
+        |> put_if_present("cloudEvents:tracestate", TraceState.to_string(message.trace_state))
+        |> put_if_present("cloudEvents:type", message.type)
 
       Keyword.put(opts, :headers, to_amqp_headers(headers))
     end

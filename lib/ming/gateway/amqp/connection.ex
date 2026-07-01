@@ -8,6 +8,10 @@ if Code.ensure_loaded?(AMQP) do
 
     use GenServer
 
+    alias Ming.Gateway.RetryConfig
+
+    require Logger
+
     @doc """
     Starts the connection holder linked to the current process.
     """
@@ -19,15 +23,31 @@ if Code.ensure_loaded?(AMQP) do
 
     @doc """
     Returns the underlying `%AMQP.Connection{}` struct.
+    Verifies the connection is alive before returning.
     """
     @spec get_connection!(atom() | pid()) :: AMQP.Connection.t()
     def get_connection!(name) do
-      GenServer.call(name, :get_connection)
+      conn = GenServer.call(name, :get_connection)
+      
+      if Process.alive?(conn.pid) do
+        conn
+      else
+        # Connection is stale, wait for restart and retry once
+        Process.sleep(100)
+        conn = GenServer.call(name, :get_connection)
+        
+        if Process.alive?(conn.pid) do
+          conn
+        else
+          raise "AMQP connection is not alive"
+        end
+      end
     end
 
     @impl true
     def init(opts) do
       connection = Keyword.fetch!(opts, :connection)
+      retry_config = RetryConfig.new(Keyword.get(opts, :retry, []))
 
       uri_or_options =
         case Keyword.get(connection, :uri) do
@@ -38,7 +58,7 @@ if Code.ensure_loaded?(AMQP) do
             connection
         end
 
-      case AMQP.Connection.open(uri_or_options) do
+      case connect_with_backoff(uri_or_options, retry_config, 0) do
         {:ok, conn} ->
           Process.monitor(conn.pid)
           {:ok, %{connection: conn}}
@@ -56,6 +76,28 @@ if Code.ensure_loaded?(AMQP) do
     @impl true
     def handle_call(:get_connection, _from, %{connection: conn} = state) do
       {:reply, conn, state}
+    end
+
+    defp connect_with_backoff(uri_or_options, retry_config, attempt)
+         when attempt < retry_config.max_retries do
+      case AMQP.Connection.open(uri_or_options) do
+        {:ok, conn} ->
+          {:ok, conn}
+
+        {:error, reason} ->
+          delay = RetryConfig.calculate_delay(retry_config, attempt)
+
+          Logger.warning(
+            "AMQP connection attempt #{attempt + 1} failed: #{inspect(reason)}, retrying in #{delay}ms"
+          )
+
+          Process.sleep(delay)
+          connect_with_backoff(uri_or_options, retry_config, attempt + 1)
+      end
+    end
+
+    defp connect_with_backoff(_uri_or_options, _retry_config, _attempt) do
+      {:error, :max_connection_attempts_exceeded}
     end
 
     @impl true

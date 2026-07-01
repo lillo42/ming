@@ -1,4 +1,12 @@
 defmodule Ming.Message.Mapper.Json do
+  @moduledoc """
+  Default mapper implementation using Elixir's built-in `JSON` module.
+
+  Converts domain requests to `%Ming.Message{}` structs and decodes message
+  payloads back into requests. Supports CloudEvents `:binary` and `:json`
+  encoding modes.
+  """
+
   alias Ming.Context
   alias Ming.Message
   alias Ming.Message.Baggage
@@ -6,7 +14,15 @@ defmodule Ming.Message.Mapper.Json do
 
   @behaviour Ming.Message.Mapper
 
+  @doc """
+  Encodes a domain request as a `%Ming.Message{}`.
+
+  Expects `:ming_message_publication` in context assigns. Halts with
+  `{:error, :invalid_param}` when the publication configuration is missing.
+  """
   @impl Ming.Message.Mapper
+  def to_message(request, context)
+
   def to_message(request, %Context{assigns: %{ming_message_publication: publication}} = context) do
     mode = Keyword.get(publication, :cloudevent_mode, :binary)
     create_message(mode, request, context)
@@ -32,7 +48,7 @@ defmodule Ming.Message.Mapper.Json do
       id: id,
       correlation_id: correlation_id,
       content_type: "application/json",
-      payload: JSON.encode_to_iodata!(request),
+      payload: JSON.encode!(request),
       routing_key: routing_key,
       timestamp: timestamp
     }
@@ -56,7 +72,7 @@ defmodule Ming.Message.Mapper.Json do
       |> Map.merge(%{
         "id" => context.id,
         "source" => extract(:source, metadata, publication, "ming"),
-        "specversion" => extract(:source, metadata, publication, "1.0"),
+        "specversion" => extract(:spec_version, metadata, publication, "1.0"),
         "type" => extract(:type, metadata, publication, routing_key),
         "data" => request,
         # not mandatory
@@ -76,7 +92,7 @@ defmodule Ming.Message.Mapper.Json do
       id: context.id,
       headers: headers,
       content_type: "application/cloudevents+json",
-      payload: JSON.encode_to_iodata!(payload),
+      payload: JSON.encode!(payload),
       routing_key: routing_key,
       timestamp: context.timestamp
     }
@@ -86,6 +102,9 @@ defmodule Ming.Message.Mapper.Json do
     Map.get(metadata, key) || Keyword.get(publication, key, default)
   end
 
+  @doc """
+  Decodes a message payload into a domain request.
+  """
   @impl Ming.Message.Mapper
   def to_request(%Message{} = message, _context) do
     JSON.decode(message.payload)

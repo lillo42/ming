@@ -14,5 +14,8 @@ defmodule Ming.Gateway do
   """
   @callback provision_infrastructure(args :: keyword()) :: :ok | {:error, any()}
 
+  @doc """
+  Returns the producer module used by this gateway to publish messages.
+  """
   @callback producer() :: module()
 end

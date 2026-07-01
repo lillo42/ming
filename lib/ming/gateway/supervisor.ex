@@ -12,7 +12,15 @@ defmodule Ming.Gateway.Supervisor do
           [
             adapter: Ming.Gateway.AMQP,
             name: :my_gateway,
-            config: [...]
+            command_processor: MyApp.CommandProcessor,
+            connection: [uri: "amqp://guest:guest@localhost"],
+            exchange: [name: "events", type: :topic],
+            publications: [
+              [routing_key: :order_created, number_of_performers: 2]
+            ],
+            subscriptions: [
+              [name: :orders, topic_or_queue: "orders.queue", routing_key: :order_created]
+            ]
           ]
         ]}
       ]
@@ -30,7 +38,67 @@ defmodule Ming.Gateway.Supervisor do
 
   @impl true
   def init(init_arg) do
-    Supervisor.init(create_children(init_arg), strategy: :one_for_one)
+    case validate(init_arg) do
+      :ok ->
+        Supervisor.init(create_children(init_arg), strategy: :one_for_one)
+
+      reply ->
+        reply
+    end
+  end
+
+  defp validate(args) do
+    publications =
+      args
+      |> Enum.flat_map(&Keyword.get(&1, :publications, []))
+      |> Enum.group_by(&Keyword.fetch!(&1, :routing_key))
+      |> Map.to_list()
+
+    subscriptions =
+      args
+      |> Enum.flat_map(&Keyword.get(&1, :subscriptions, []))
+      |> Enum.group_by(&Keyword.fetch!(&1, :name))
+      |> Map.to_list()
+
+    with :ok <- validate_publication(publications),
+         :ok <- validate_subscription(subscriptions) do
+      :ok
+    else
+      reply ->
+        reply
+    end
+  end
+
+  defp validate_publication([]), do: :ok
+
+  defp validate_publication([{key, publications} | next]) when is_atom(key) do
+    case Enum.count(publications) do
+      total when total > 1 ->
+        {:error, {:duplicate_publication_routing_key, key}}
+
+      _ ->
+        validate_publication(next)
+    end
+  end
+
+  defp validate_publication([{key, _publications} | _next]) do
+    {:error, {:invalid_publication_routing_key, key}}
+  end
+
+  defp validate_subscription([]), do: :ok
+
+  defp validate_subscription([{key, subscription} | next]) when is_atom(key) do
+    case Enum.count(subscription) do
+      total when total > 1 ->
+        {:error, {:duplicate_subscription_name, key}}
+
+      _ ->
+        validate_subscription(next)
+    end
+  end
+
+  defp validate_subscription([{key, _subscription} | _next]) do
+    {:error, {:invalid_subscription_name, key}}
   end
 
   defp create_children([]), do: []

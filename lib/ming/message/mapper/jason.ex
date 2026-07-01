@@ -1,5 +1,12 @@
-if Code.loaded?(Jason) do
+if Code.ensure_loaded?(Jason) do
   defmodule Ming.Message.Mapper.Jason do
+    @moduledoc """
+    Optional mapper implementation using the `Jason` JSON library.
+
+    Mirrors `Ming.Message.Mapper.Json` but uses `Jason` for encoding and
+    decoding. This module is only compiled when `Jason` is present.
+    """
+
     alias Ming.Context
     alias Ming.Message
     alias Ming.Message.Baggage
@@ -7,7 +14,15 @@ if Code.loaded?(Jason) do
 
     @behaviour Ming.Message.Mapper
 
+    @doc """
+    Encodes a domain request as a `%Ming.Message{}`.
+
+    Expects `:ming_message_publication` in context assigns. Halts with
+    `{:error, :invalid_param}` when the publication configuration is missing.
+    """
     @impl Ming.Message.Mapper
+    def to_message(request, context)
+
     def to_message(request, %Context{assigns: %{ming_message_publication: publication}} = context) do
       mode = Keyword.get(publication, :cloudevent_mode, :binary)
       create_message(mode, request, context)
@@ -33,7 +48,7 @@ if Code.loaded?(Jason) do
         id: id,
         correlation_id: correlation_id,
         content_type: "application/json",
-        payload: Jason.encode_to_iodata!(request),
+        payload: Jason.encode!(request),
         routing_key: routing_key,
         timestamp: timestamp
       }
@@ -57,7 +72,7 @@ if Code.loaded?(Jason) do
         |> Map.merge(%{
           "id" => context.id,
           "source" => extract(:source, metadata, publication, "ming"),
-          "specversion" => extract(:source, metadata, publication, "1.0"),
+          "specversion" => extract(:spec_version, metadata, publication, "1.0"),
           "type" => extract(:type, metadata, publication, routing_key),
           "data" => request,
           # not mandatory
@@ -77,7 +92,7 @@ if Code.loaded?(Jason) do
         id: context.id,
         headers: headers,
         content_type: "application/cloudevents+json",
-        payload: Jason.encode_to_iodata!(payload),
+        payload: Jason.encode!(payload),
         routing_key: routing_key,
         timestamp: context.timestamp
       }
@@ -87,9 +102,12 @@ if Code.loaded?(Jason) do
       Map.get(metadata, key) || Keyword.get(publication, key, default)
     end
 
+    @doc """
+    Decodes a message payload into a domain request.
+    """
     @impl Ming.Message.Mapper
     def to_request(%Message{} = message, _context) do
-      JSON.decode(message.payload)
+      Jason.decode(message.payload)
     end
   end
 end

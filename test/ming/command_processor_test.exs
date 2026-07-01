@@ -48,6 +48,48 @@ defmodule Ming.CommandProcessorTest do
     router(RouterTwo)
   end
 
+  defmodule MessagingProcessor do
+    use Ming.CommandProcessor
+  end
+
+  setup do
+    original_env = Application.get_env(:ming, :gateways)
+
+    on_exit(fn ->
+      if is_nil(original_env) do
+        Application.delete_env(:ming, :gateways)
+      else
+        Application.put_env(:ming, :gateways, original_env)
+      end
+    end)
+  end
+
+  describe "message router integration" do
+    test "post/2 publishes a request through the messaging gateway" do
+      start_supervised!(FakeProducerAgent)
+
+      Application.put_env(:ming, :gateways, [
+        [
+          adapter: FakeProducerGateway,
+          publications: [
+            [
+              routing_key: :order_created,
+              source: "cmd-proc-test",
+              mapper: FakeCommandProcessorMapper
+            ]
+          ]
+        ]
+      ])
+
+      assert {:ok, :published} =
+               MessagingProcessor.post(%{"order_id" => 1}, routing_key: :order_created)
+
+      [message] = FakeProducerAgent.messages()
+      assert message.source == "cmd-proc-test"
+      assert JSON.decode!(message.payload) == %{"order_id" => 1}
+    end
+  end
+
   describe "send/2" do
     test "routes command to the correct router" do
       assert {:ok, 42} = MyProcessor.send(%CommandOne{val: 42})
@@ -96,4 +138,21 @@ defmodule Ming.CommandProcessorTest do
       assert {:ok, 99} in results
     end
   end
+end
+
+defmodule FakeCommandProcessorMapper do
+  alias Ming.Context
+  alias Ming.Message
+
+  def to_message(request, %Context{assigns: %{ming_message_publication: publication}} = context) do
+    %Message{
+      id: context.id,
+      payload: JSON.encode!(request),
+      routing_key: context.routing_key,
+      timestamp: context.timestamp,
+      source: Keyword.get(publication, :source)
+    }
+  end
+
+  def to_request(_message, _context), do: {:ok, %{}}
 end

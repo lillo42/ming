@@ -1,9 +1,23 @@
-defmodule Ming.Message.Middleware.UpdateMessageFromConfig do
+defmodule Ming.Message.Middleware.ApplyPublicationDefaults do
+  @moduledoc """
+  Middleware that fills missing `%Ming.Message{}` fields from publication
+  configuration and context metadata.
+
+  Expects `:publication` in context assigns. Default headers are merged in
+  the order: publication defaults, metadata headers, message headers.
+  """
+
   alias Ming.Context
   alias Ming.Message
 
   @behaviour Ming.Middleware
 
+  @doc """
+  Applies publication defaults and metadata overrides to the message.
+
+  Halts with `{:error, :invalid_params}` when the request is not a
+  `%Ming.Message{}` or no publication is configured.
+  """
   @impl Ming.Middleware
   def before_handle(
         %Context{
@@ -28,7 +42,7 @@ defmodule Ming.Message.Middleware.UpdateMessageFromConfig do
         subject: extract(:subject, message, metadata, publication),
         trace_parent: extract(:trace_parent, message, metadata),
         trace_state: extract(:trace_state, message, metadata),
-        type: extract(:trace_parent, message, metadata)
+        type: extract(:type, message, metadata)
     }
 
     %Context{context | request: message}
@@ -40,6 +54,12 @@ defmodule Ming.Message.Middleware.UpdateMessageFromConfig do
     |> Context.respond({:error, :invalid_params})
   end
 
+  @doc """
+  No-op after stage.
+  """
+  @impl Ming.Middleware
+  def after_handle(context), do: context
+
   defp extract(key, message, metadata) do
     Map.get(message, key) || Map.get(metadata, key)
   end
@@ -47,7 +67,4 @@ defmodule Ming.Message.Middleware.UpdateMessageFromConfig do
   defp extract(key, message, metadata, publication) do
     Map.get(message, key) || Map.get(metadata, key) || Keyword.get(publication, key)
   end
-
-  @impl Ming.Middleware
-  def after_handle(context), do: context
 end

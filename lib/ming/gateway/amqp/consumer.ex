@@ -33,27 +33,32 @@ if Code.ensure_loaded?(AMQP) do
       gateway_name = Keyword.fetch!(args, :gateway_name)
 
       conn = Connection.get_connection!(gateway_name)
-      {:ok, channel} = Channel.open(conn)
 
-      topic_or_queue = Keyword.fetch!(args, :topic_or_queue)
-      name = Keyword.fetch!(args, :name)
-      routing_key = Keyword.fetch!(args, :routing_key)
+      case Channel.open(conn) do
+        {:ok, channel} ->
+          topic_or_queue = Keyword.fetch!(args, :topic_or_queue)
+          name = Keyword.fetch!(args, :name)
+          routing_key = Keyword.fetch!(args, :routing_key)
 
-      buffer_size = Keyword.get(args, :buffer_size, 1)
-      number_of_performers = Keyword.get(args, :number_of_performers, 1)
+          buffer_size = Keyword.get(args, :buffer_size, 1)
+          number_of_performers = Keyword.get(args, :number_of_performers, 1)
 
-      with :ok <- Basic.qos(channel, prefetch_count: buffer_size * number_of_performers),
-           {:ok, _val} <- Basic.consume(channel, topic_or_queue) do
-        {:ok,
-         %{
-           channel: channel,
-           name: name,
-           routing_key: routing_key,
-           timeout: Keyword.get(args, :processing_timeout, :infinity)
-         }}
-      else
+          with :ok <- Basic.qos(channel, prefetch_count: buffer_size * number_of_performers),
+               {:ok, _val} <- Basic.consume(channel, topic_or_queue) do
+            {:ok,
+             %{
+               channel: channel,
+               name: name,
+               routing_key: routing_key,
+               timeout: Keyword.get(args, :processing_timeout, :infinity)
+             }}
+          else
+            {:error, reason} ->
+              Channel.close(channel)
+              {:stop, reason}
+          end
+
         {:error, reason} ->
-          :ok = Channel.close(channel)
           {:stop, reason}
       end
     end
@@ -84,8 +89,7 @@ if Code.ensure_loaded?(AMQP) do
       {:stop, :stopped_by_client, state}
     end
 
-    def handle_info(
-          {:basic_deliver, payload, metadata},
+    def handle_info({:basic_deliver, payload, metadata},
           %{
             channel: channel,
             name: name,
@@ -98,12 +102,16 @@ if Code.ensure_loaded?(AMQP) do
       MessageProcess.process(
         name,
         channel,
-        Map.fetch!(metadata, :delivery_tag),
+        Map.get(metadata, :delivery_tag),
         routing_key,
         message,
         timeout
       )
 
+      {:noreply, state}
+    end
+
+    def handle_info(_msg, state) do
       {:noreply, state}
     end
 
@@ -119,7 +127,11 @@ if Code.ensure_loaded?(AMQP) do
         |> Map.put(:amqp_metadata, metadata)
 
       message_id =
-        Map.get(headers, "cloudEvents:id") || Map.get(metadata, :message_id, UUIDv7.generate())
+        case Map.get(headers, "cloudEvents:id") do
+          nil -> Map.get(metadata, :message_id, UUIDv7.generate())
+          "" -> ""
+          id -> id
+        end
 
       timestamp =
         parse_timestamp(Map.get(headers, "cloudEvents:time") || Map.get(metadata, :timestamp))
@@ -166,7 +178,7 @@ if Code.ensure_loaded?(AMQP) do
        end)}
     end
 
-    defp parse_header_value({key, :timestamp, val}) do
+    defp parse_header_value({key, :timestamp, val}) when is_integer(val) do
       case DateTime.from_unix(val, :second) do
         {:ok, datetime} ->
           {key, datetime}
@@ -175,6 +187,18 @@ if Code.ensure_loaded?(AMQP) do
           {key, val}
       end
     end
+
+    defp parse_header_value({key, :timestamp, val}) when is_binary(val) do
+      case DateTime.from_iso8601(val) do
+        {:ok, datetime, _calendar} ->
+          {key, datetime}
+
+        {:error, _reason} ->
+          {key, val}
+      end
+    end
+
+    defp parse_header_value({key, :timestamp, val}), do: {key, val}
 
     defp parse_header_value({key, _type, val}), do: {key, val}
 

@@ -52,6 +52,12 @@ defmodule Ming do
 
   @type cloudevent_mode :: :binary | :json
 
+  @type retry_opts ::
+          {:max_retries, non_neg_integer()}
+          | {:base_delay, non_neg_integer()}
+          | {:max_delay, non_neg_integer()}
+          | {:backoff_type, :rand_exp | :exp | :linear | :fixed}
+
   @type publication_opts ::
           {:additional_cloudevent_properties, map() | nil}
           | {:cloudevent_mode, cloudevent_mode()}
@@ -60,6 +66,7 @@ defmodule Ming do
           | {:default_headers, map() | nil}
           | {:provision, provision()}
           | {:reply_to, routing_key() | String.t() | URI.t() | nil}
+          | {:retry, keyword(retry_opts())}
           | {:routing_key, routing_key()}
           | {:source, URI.t() | String.t()}
           | {:spec_version, String.t() | nil}

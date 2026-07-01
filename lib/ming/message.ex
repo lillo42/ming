@@ -4,11 +4,32 @@ defmodule Ming.Message do
 
   This struct is used as the standard message format across gateways
   and supports CloudEvents attributes for interoperability.
+
+  ## Fields
+
+  - `:id` — Unique message identifier.
+  - `:correlation_id` — Correlation identifier for tracing requests.
+  - `:payload` — Raw message payload (required).
+  - `:routing_key` — Destination routing key (required).
+  - `:timestamp` — `%DateTime{}` when the message was created (required).
+  - `:content_type` — MIME type of the payload, defaults to `"text/plain"`.
+  - `:headers` — Map of protocol/gateway-specific headers, defaults to `%{}`.
+  - `:spec_version` — CloudEvents spec version, defaults to `"1.0"`.
+  - `:source` — CloudEvents source.
+  - `:type` — CloudEvents type.
+  - `:subject` — CloudEvents subject.
+  - `:data_schema` — CloudEvents data schema URI.
+  - `:data_ref` — CloudEvents data reference.
+  - `:trace_parent` — W3C trace parent.
+  - `:trace_state` — W3C trace state map.
+  - `:baggage` — W3C baggage map.
+  - `:reply_to` — Reply-to address or routing key.
+  - `:partition_key` — Partitioning key for ordered delivery.
+  - `:additional_cloud_events_properties` — Extra CloudEvent attributes.
   """
 
   @type t :: %__MODULE__{
           id: Ming.id(),
-          additional_cloud_events_properties: map() | nil,
           baggage: map() | nil,
           content_type: String.t(),
           correlation_id: Ming.id(),
@@ -27,10 +48,9 @@ defmodule Ming.Message do
           type: String.t() | atom()
         }
 
-  @enforce_keys [:id, :payload, :routing_key]
+  @enforce_keys [:id, :payload, :routing_key, :timestamp]
   defstruct [
     :id,
-    :additional_cloud_events_properties,
     :baggage,
     :correlation_id,
     :data_schema,
@@ -49,8 +69,4 @@ defmodule Ming.Message do
     headers: %{},
     spec_version: "1.0"
   ]
-
-  def new(attrs \\ %{}) do
-    struct!(__MODULE__, Map.put_new(attrs, :timestamp, DateTime.utc_now()))
-  end
 end
