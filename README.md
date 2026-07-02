@@ -12,6 +12,7 @@ Provides support for:
 - A flexible, context-driven Middleware pipeline (similar to Plug)
 - First-class `:telemetry` and structured logging integration
 - Configurable execution timeouts
+- In-memory messaging gateway for local development and testing
 
 Requires Erlang/OTP v27 and Elixir v1.20 or later.
 
@@ -116,6 +117,110 @@ MyApp.CommandProcessor.send(%{payload: "data"}, routing_key: :custom_key)
 
 # Similarly, publish supports passing options like `dispatch_strategy`
 MyApp.CommandProcessor.publish(%UserCreated{id: 123}, dispatch_strategy: :parallel)
+```
+
+## Gateways
+
+Ming supports messaging gateways for producing and consuming messages through external brokers. An in-memory gateway is included for local development and testing.
+
+### In-Memory Gateway
+
+`Ming.Gateway.InMemory` routes messages directly inside the BEAM, with no external infrastructure. It is useful for local development, CI, and testing.
+
+```elixir
+defmodule MyApp.GatewaySupervisor do
+  use Supervisor
+
+  def init(_opts) do
+    children = [
+      {Ming.Gateway.Supervisor, [
+        [
+          adapter: Ming.Gateway.InMemory,
+          name: :my_in_memory_gateway,
+          command_processor: MyApp.CommandProcessor,
+          publications: [
+            [routing_key: :order_created]
+          ],
+          subscriptions: [
+            [name: :orders, routing_key: :order_created]
+          ]
+        ]
+      ]}
+    ]
+
+    Supervisor.init(children, strategy: :one_for_one)
+  end
+end
+```
+
+You can publish messages through the in-memory gateway using `Ming.CommandProcessor.post/2`:
+
+```elixir
+MyApp.CommandProcessor.post(%OrderCreated{id: 123})
+```
+
+Consumed messages are dispatched through the configured `command_processor` using the same `:ming_consume_message` pipeline as the AMQP gateway.
+
+### AMQP Gateway
+
+`Ming.Gateway.AMQP` connects to an AMQP broker (RabbitMQ, etc.) for production messaging. It manages connections, publisher pools, and consumers, and provisions exchanges and queues before startup.
+
+```elixir
+defmodule MyApp.GatewaySupervisor do
+  use Supervisor
+
+  def init(_opts) do
+    children = [
+      {Ming.Gateway.Supervisor, [
+        [
+          adapter: Ming.Gateway.AMQP,
+          name: :my_amqp_gateway,
+          command_processor: MyApp.CommandProcessor,
+          connection: [
+            uri: "amqp://guest:guest@localhost",
+            retry: [max_retries: 5, base_delay: 1_000]
+          ],
+          exchange: [
+            name: "events",
+            type: :topic,
+            provision: :create
+          ],
+          publications: [
+            [routing_key: :order_created, number_of_performers: 2]
+          ],
+          subscriptions: [
+            [
+              name: :orders,
+              topic_or_queue: "orders.queue",
+              routing_key: :order_created,
+              provision: :create
+            ]
+          ]
+        ]
+      ]}
+    ]
+
+    Supervisor.init(children, strategy: :one_for_one)
+  end
+end
+```
+
+Add `:amqp` and `:nimble_pool` to your dependencies to use the AMQP gateway:
+
+```elixir
+defp deps do
+  [
+    {:ming, "~> 0.2.0"},
+    {:amqp, "~> 4.1"},
+    {:nimble_pool, "~> 1.1"}
+  ]
+end
+```
+
+Publishing and consuming work the same way as the in-memory gateway:
+
+```elixir
+MyApp.CommandProcessor.post(%OrderCreated{id: 123})
 ```
 
 ## Middleware Pipeline

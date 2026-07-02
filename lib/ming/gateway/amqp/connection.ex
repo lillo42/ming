@@ -102,7 +102,12 @@ if Code.ensure_loaded?(AMQP) do
 
     @impl true
     def terminate(_reason, %{connection: conn}) do
-      AMQP.Connection.close(conn)
+      try do
+        AMQP.Connection.close(conn)
+      catch
+        :exit, _ -> :ok
+        :error, _ -> :ok
+      end
     end
   end
 end

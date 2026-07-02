@@ -89,34 +89,38 @@ if Code.ensure_loaded?(AMQP) do
         |> Keyword.put_new(:retry, [])
 
       children =
-        [{Connection, connection_config}]
-        |> publication(name, Keyword.get(args, :publications, []))
+        [{Connection, [name: connection_name, connection: connection_config]}]
+        |> publication(connection_name, Keyword.get(args, :publications, []))
         |> subscriptions(
-          name,
+          connection_name,
           Keyword.fetch!(args, :command_processor),
           Keyword.get(args, :subscriptions, [])
         )
 
-      Supervisor.init(children, strategy: :one_for_one)
+      Supervisor.init(Enum.reverse(children), strategy: :one_for_one)
     end
 
     defp publication(acc, _gateway_name, []), do: acc
 
     defp publication(acc, gateway_name, [publication | next]) do
+      pool_name = Keyword.fetch!(publication, :routing_key)
+
+      worker_opts =
+        publication
+        |> Keyword.put(:gateway_name, gateway_name)
+        |> Keyword.put_new(:retry, [])
+
+      pool_opts = [
+        name: pool_name,
+        pool_size: Keyword.get(publication, :number_of_performers, 1),
+        lazy: Keyword.get(publication, :lazy, false),
+        idle_timeout: Keyword.get(publication, :idle_timeout, :infinity),
+        max_idle_pings: Keyword.get(publication, :idle_pings, :infinity),
+        worker: {Publisher, worker_opts}
+      ]
+
       [
-        {
-          NimblePool,
-          name: Keyword.fetch!(publication, :routing_key),
-          pool_size: Keyword.get(publication, :number_of_performers, 1),
-          lazy: Keyword.get(publication, :lazy, false),
-          idle_timeout: Keyword.get(publication, :idle_timeout, :infinity),
-          max_idle_pings: Keyword.get(publication, :idle_pings, :infinity),
-          worker:
-            {Publisher,
-             publication
-             |> Keyword.put(:gateway_name, gateway_name)
-             |> Keyword.put_new(:retry, [])}
-        }
+        %{id: pool_name, start: {NimblePool, :start_link, [pool_opts]}}
         | publication(acc, gateway_name, next)
       ]
     end
@@ -124,21 +128,31 @@ if Code.ensure_loaded?(AMQP) do
     defp subscriptions(acc, _gateway_name, _command_process, []), do: acc
 
     defp subscriptions(acc, gateway_name, command_process, [subscription | next]) do
+      consumer_name = Keyword.fetch!(subscription, :name)
+      process_pool_name = :"#{consumer_name}_process"
+
+      consumer_opts =
+        subscription
+        |> Keyword.put(:gateway_name, gateway_name)
+        |> Keyword.put(:process_pool_name, process_pool_name)
+
+      worker_opts =
+        subscription
+        |> Keyword.put(:gateway_name, gateway_name)
+        |> Keyword.put(:command_process, command_process)
+
+      pool_opts = [
+        name: process_pool_name,
+        pool_size: Keyword.get(subscription, :number_of_performers, 1),
+        lazy: Keyword.get(subscription, :lazy, false),
+        idle_timeout: Keyword.get(subscription, :idle_timeout, :infinity),
+        max_idle_pings: Keyword.get(subscription, :idle_pings, :infinity),
+        worker: {MessageProcess, worker_opts}
+      ]
+
       [
-        {Consumer, Keyword.put(subscription, :gateway_name, gateway_name)},
-        {
-          NimblePool,
-          name: Keyword.fetch!(subscription, :name),
-          pool_size: Keyword.get(subscription, :number_of_performers, 1),
-          lazy: Keyword.get(subscription, :lazy, false),
-          idle_timeout: Keyword.get(subscription, :idle_timeout, :infinity),
-          max_idle_pings: Keyword.get(subscription, :idle_pings, :infinity),
-          worker:
-            {MessageProcess,
-             subscription
-             |> Keyword.put(:gateway_name, gateway_name)
-             |> Keyword.put(:command_process, command_process)}
-        }
+        %{id: consumer_name, start: {Consumer, :start_link, [consumer_opts]}},
+        %{id: {process_pool_name, MessageProcess}, start: {NimblePool, :start_link, [pool_opts]}}
         | subscriptions(acc, gateway_name, command_process, next)
       ]
     end
@@ -146,7 +160,7 @@ if Code.ensure_loaded?(AMQP) do
     @behaviour Ming.Gateway
 
     @impl Ming.Gateway
-    def producer(), do: Ming.Gateway.AMQP.Producer
+    def producer, do: Ming.Gateway.AMQP.Producer
 
     @doc """
     Provisions AMQP infrastructure (exchanges, queues, bindings) before the gateway starts.
@@ -170,6 +184,12 @@ if Code.ensure_loaded?(AMQP) do
     end
 
     defp create_connection(uri_or_opts) do
+      uri_or_opts =
+        case Keyword.get(uri_or_opts, :uri) do
+          uri when not is_nil(uri) -> uri
+          _ -> uri_or_opts
+        end
+
       case AMQP.Connection.open(uri_or_opts) do
         {:ok, conn} ->
           {:ok, conn}
@@ -204,11 +224,16 @@ if Code.ensure_loaded?(AMQP) do
     defp ensure_exchange_exists(val, exchange) when is_binary(exchange), do: val
 
     defp ensure_exchange_exists({:ok, conn, channel}, exchange) do
-      case ensure_exchange_exists(Keyword.get(exchange, :provision), channel, exchange) do
-        :ok ->
-          {:ok, conn, channel}
+      try do
+        case ensure_exchange_exists(Keyword.get(exchange, :provision), channel, exchange) do
+          :ok ->
+            {:ok, conn, channel}
 
-        {:error, reason} ->
+          {:error, reason} ->
+            {:error, reason, conn, channel}
+        end
+      catch
+        :exit, reason ->
           {:error, reason, conn, channel}
       end
     end
@@ -255,12 +280,17 @@ if Code.ensure_loaded?(AMQP) do
       dead_letter_queue = Keyword.get(subscription, :dead_letter)
       provision = Keyword.get(subscription, :provision, :assume)
 
-      with {:ok, _queue} <- ensure_queue_exists(provision, channel, dead_letter_queue),
-           {:ok, _queue} <- ensure_queue_exists(provision, channel, queue),
-           :ok <- ensure_queue_is_bound(provision, channel, queue, exchange) do
-        ensure_queues_exists({:ok, conn, channel}, next, exchange)
-      else
-        {:error, reason} ->
+      try do
+        with {:ok, _queue} <- ensure_queue_exists(provision, channel, dead_letter_queue),
+             {:ok, _queue} <- ensure_queue_exists(provision, channel, queue),
+             :ok <- ensure_queue_is_bound(provision, channel, queue, exchange) do
+          ensure_queues_exists({:ok, conn, channel}, next, exchange)
+        else
+          {:error, reason} ->
+            {:error, reason, conn, channel}
+        end
+      catch
+        :exit, reason ->
           {:error, reason, conn, channel}
       end
     end
@@ -300,17 +330,27 @@ if Code.ensure_loaded?(AMQP) do
     defp close_channel({:error, reason, conn, nil}), do: {:error, reason, conn}
 
     defp close_channel({:error, reason, conn, channel}) do
-      AMQP.Channel.close(channel)
+      try do
+        AMQP.Channel.close(channel)
+      catch
+        _, _ -> :ok
+      end
+
       {:error, reason, conn}
     end
 
     defp close_channel({:ok, conn, channel}) do
-      case Channel.close(channel) do
-        :ok ->
-          {:ok, conn}
+      try do
+        case Channel.close(channel) do
+          :ok ->
+            {:ok, conn}
 
-        {:error, reason} ->
-          {:error, reason, conn}
+          {:error, reason} ->
+            {:error, reason, conn}
+        end
+      catch
+        _, _ ->
+          {:ok, conn}
       end
     end
 

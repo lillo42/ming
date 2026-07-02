@@ -20,12 +20,12 @@ if Code.ensure_loaded?(AMQP) do
     """
     @spec publish(atom(), String.t(), String.t(), binary(), keyword()) ::
             :ok | {:error, any()}
-    def publish(pool_name, exchange, routing_key, payload, opts) do
-      NimblePool.checkout!(pool_name, :publish, fn _ref, channel ->
-        result = Basic.publish(channel, exchange, routing_key, payload, opts)
-        {result, channel}
-      end)
-    end
+  def publish(pool_name, exchange, routing_key, payload, opts) do
+    NimblePool.checkout!(pool_name, :publish, fn _ref, channel ->
+      result = Basic.publish(channel, exchange, routing_key, payload, opts)
+      {result, %{channel: channel, last_usage: DateTime.utc_now()}}
+    end)
+  end
 
     @impl NimblePool
     def init_pool(args) do
@@ -82,22 +82,25 @@ if Code.ensure_loaded?(AMQP) do
     end
 
     @impl NimblePool
-    def handle_checkin(:ok, _from, _worker_state, pool_state) do
-      {:ok, pool_state}
+    def handle_checkin(:ok, _from, worker_state, pool_state) do
+      {:ok, worker_state, pool_state}
     end
 
-    def handle_checkin({:error, _reason}, _from, _worker_state, pool_state) do
-      {:ok, pool_state}
+    def handle_checkin({:error, _reason}, _from, worker_state, pool_state) do
+      {:ok, worker_state, pool_state}
+    end
+
+    def handle_checkin(_result, _from, worker_state, pool_state) do
+      {:ok, worker_state, pool_state}
     end
 
     @impl NimblePool
     def terminate_worker(_reason, %{channel: channel}, pool_state) do
       try do
         Channel.close(channel)
-      rescue
-        _e -> nil
       catch
-        _e -> nil
+        :exit, _ -> nil
+        :error, _ -> nil
       end
 
       {:ok, pool_state}

@@ -38,11 +38,11 @@ if Code.ensure_loaded?(AMQP) do
 
           {result, command_process}
         end,
-        5_000
+        :infinity
       )
     catch
       :exit, _reason ->
-        {:error, :pool_checkout_timeout}
+        {:error, :process_timeout}
     end
 
     def process(name, channel, delivery_tag, routing_key, message, timeout) do
@@ -60,23 +60,23 @@ if Code.ensure_loaded?(AMQP) do
                 Basic.ack(channel, delivery_tag)
 
               {:ok, :reject} ->
-                Basic.reject(channel, delivery_tag)
+                Basic.reject(channel, delivery_tag, requeue: false)
 
               {:ok, :requeue} ->
                 Basic.reject(channel, delivery_tag, requeue: true)
 
               {:error, _reason} ->
-                Basic.reject(channel, delivery_tag)
+                Basic.reject(channel, delivery_tag, requeue: false)
             end
 
           {result, command_process}
         end,
-        5_000
+        :infinity
       )
     catch
       :exit, _reason ->
         Basic.reject(channel, delivery_tag, requeue: true)
-        {:error, :pool_checkout_timeout}
+        {:error, :process_timeout}
     end
 
     @impl NimblePool
@@ -101,6 +101,10 @@ if Code.ensure_loaded?(AMQP) do
     end
 
     def handle_checkin({:error, _reason}, _from, worker_state, pool_state) do
+      {:ok, worker_state, pool_state}
+    end
+
+    def handle_checkin(_result, _from, worker_state, pool_state) do
       {:ok, worker_state, pool_state}
     end
   end

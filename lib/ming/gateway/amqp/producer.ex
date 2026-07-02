@@ -62,7 +62,7 @@ if Code.ensure_loaded?(AMQP) do
       Publisher.publish(
         routing_key,
         exchange,
-        routing_key,
+        to_string(routing_key),
         message.payload,
         publish_opts
       )

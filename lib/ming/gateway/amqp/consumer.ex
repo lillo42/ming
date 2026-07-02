@@ -37,18 +37,17 @@ if Code.ensure_loaded?(AMQP) do
       case Channel.open(conn) do
         {:ok, channel} ->
           topic_or_queue = Keyword.fetch!(args, :topic_or_queue)
-          name = Keyword.fetch!(args, :name)
           routing_key = Keyword.fetch!(args, :routing_key)
 
           buffer_size = Keyword.get(args, :buffer_size, 1)
           number_of_performers = Keyword.get(args, :number_of_performers, 1)
 
           with :ok <- Basic.qos(channel, prefetch_count: buffer_size * number_of_performers),
-               {:ok, _val} <- Basic.consume(channel, topic_or_queue) do
+               {:ok, _val} <- Basic.consume(channel, to_string(topic_or_queue)) do
             {:ok,
              %{
                channel: channel,
-               name: name,
+               process_pool_name: Keyword.fetch!(args, :process_pool_name),
                routing_key: routing_key,
                timeout: Keyword.get(args, :processing_timeout, :infinity)
              }}
@@ -67,10 +66,9 @@ if Code.ensure_loaded?(AMQP) do
     def terminate(_reason, state) do
       try do
         Channel.close(state.channel)
-      rescue
-        _exception -> nil
       catch
-        _e -> nil
+        :exit, _ -> nil
+        :error, _ -> nil
       end
 
       :ok
@@ -93,7 +91,7 @@ if Code.ensure_loaded?(AMQP) do
           {:basic_deliver, payload, metadata},
           %{
             channel: channel,
-            name: name,
+            process_pool_name: process_pool_name,
             routing_key: routing_key,
             timeout: timeout
           } = state
@@ -101,7 +99,7 @@ if Code.ensure_loaded?(AMQP) do
       message = to_message(payload, metadata, routing_key)
 
       MessageProcess.process(
-        name,
+        process_pool_name,
         channel,
         Map.get(metadata, :delivery_tag),
         routing_key,
@@ -204,6 +202,7 @@ if Code.ensure_loaded?(AMQP) do
     defp parse_header_value({key, _type, val}), do: {key, val}
 
     defp parse_timestamp(nil), do: DateTime.utc_now()
+    defp parse_timestamp(:undefined), do: DateTime.utc_now()
 
     defp parse_timestamp(val) when is_number(val) do
       case DateTime.from_unix(val, :second) do
