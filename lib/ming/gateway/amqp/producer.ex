@@ -8,10 +8,10 @@ if Code.ensure_loaded?(AMQP) do
     `:binary` and `:json` modes.
     """
 
+    alias Ming.Gateway.AMQP.Publisher
     alias Ming.Message
     alias Ming.Message.Baggage
     alias Ming.Message.TraceState
-    alias Ming.Gateway.AMQP.Publisher
 
     @behaviour Ming.Message.Producer
 

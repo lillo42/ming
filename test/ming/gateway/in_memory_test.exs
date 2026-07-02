@@ -4,12 +4,13 @@ defmodule Ming.Gateway.InMemoryTest do
   alias Ming.Gateway.InMemory
   alias Ming.Gateway.InMemory.Broker
   alias Ming.Gateway.InMemory.Producer
+  alias Ming.Gateway.InMemoryTest.InMemoryFakeAgent
   alias Ming.Message
 
   defmodule InMemoryFakeProcessor do
     @moduledoc false
     def send(request, opts) do
-      Ming.Gateway.InMemoryTest.InMemoryFakeAgent.behavior().(request, opts)
+      InMemoryFakeAgent.behavior().(request, opts)
     end
   end
 

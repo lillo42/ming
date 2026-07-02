@@ -3,6 +3,7 @@ defmodule Ming.Message.RouterTest do
 
   alias Ming.Context
   alias Ming.Message
+  alias Ming.Message.Router
 
   setup do
     original_env = Application.get_env(:ming, :gateways)
@@ -18,8 +19,8 @@ defmodule Ming.Message.RouterTest do
 
   describe "routing keys" do
     test "exposes the messaging routing keys" do
-      assert :ming_produce_message in Ming.Message.Router.__register_routing_keys__()
-      assert :ming_consume_message in Ming.Message.Router.__register_routing_keys__()
+      assert :ming_produce_message in Router.__register_routing_keys__()
+      assert :ming_consume_message in Router.__register_routing_keys__()
     end
   end
 
@@ -42,7 +43,7 @@ defmodule Ming.Message.RouterTest do
       ])
 
       assert {:ok, :published} =
-               Ming.Message.Router.send(
+               Router.send(
                  :ming_produce_message,
                  %{"order_id" => 1},
                  metadata: %{
@@ -61,7 +62,7 @@ defmodule Ming.Message.RouterTest do
 
   describe ":ming_consume_message" do
     test "is registered as a routing key" do
-      assert :ming_consume_message in Ming.Message.Router.__register_routing_keys__()
+      assert :ming_consume_message in Router.__register_routing_keys__()
     end
   end
 end

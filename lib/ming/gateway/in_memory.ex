@@ -99,7 +99,7 @@ defmodule Ming.Gateway.InMemory do
   @behaviour Ming.Gateway
 
   @impl Ming.Gateway
-  def producer(), do: Ming.Gateway.InMemory.Producer
+  def producer, do: Ming.Gateway.InMemory.Producer
 
   @doc """
   No-op provisioning for the in-memory adapter.

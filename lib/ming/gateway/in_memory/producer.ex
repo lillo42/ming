@@ -6,9 +6,9 @@ defmodule Ming.Gateway.InMemory.Producer do
   that in-memory consumers can receive them.
   """
 
-  alias Ming.Message
   alias Ming.Gateway.InMemory
   alias Ming.Gateway.InMemory.Broker
+  alias Ming.Message
 
   @behaviour Ming.Message.Producer
 
