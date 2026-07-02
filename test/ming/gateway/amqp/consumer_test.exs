@@ -29,16 +29,30 @@ defmodule Ming.Gateway.AMQP.ConsumerTest do
 
   defp declare_queue(chan, exchange, routing_key) do
     queue = unique_name(:consumer_queue)
+    queue_str = to_string(queue)
+    exchange_str = to_string(exchange)
 
     try do
-      Queue.delete(chan, to_string(queue))
+      Queue.delete(chan, queue_str)
     catch
       _, _ -> :ok
     end
 
-    :ok = Exchange.declare(chan, to_string(exchange), :topic, durable: true)
-    assert {:ok, _} = Queue.declare(chan, to_string(queue), durable: true)
-    :ok = Queue.bind(chan, to_string(queue), to_string(exchange), routing_key: to_string(routing_key))
+    :ok = Exchange.declare(chan, exchange_str, :topic, durable: true)
+    assert {:ok, _} = Queue.declare(chan, queue_str, durable: true)
+
+    :ok =
+      Queue.bind(chan, queue_str, exchange_str, routing_key: to_string(routing_key))
+
+    on_exit(fn ->
+      try do
+        Queue.delete(chan, queue_str)
+        Exchange.delete(chan, exchange_str)
+      catch
+        _, _ -> :ok
+      end
+    end)
+
     queue
   end
 
@@ -52,13 +66,18 @@ defmodule Ming.Gateway.AMQP.ConsumerTest do
     consumer_name = unique_name(:consumer)
     process_pool_name = unique_name(:consumer_process_pool)
 
-    start_supervised!(
-      %{id: process_pool_name, start: {NimblePool, :start_link, [[
-        name: process_pool_name,
-        worker: {MessageProcess, command_process: TestAMQPProcessor},
-        pool_size: 1
-      ]]}}
-    )
+    start_supervised!(%{
+      id: process_pool_name,
+      start:
+        {NimblePool, :start_link,
+         [
+           [
+             name: process_pool_name,
+             worker: {MessageProcess, command_process: TestAMQPProcessor},
+             pool_size: 1
+           ]
+         ]}
+    })
 
     start_supervised!(
       {Consumer,
@@ -74,12 +93,6 @@ defmodule Ming.Gateway.AMQP.ConsumerTest do
 
     on_exit(fn ->
       Application.delete_env(:ming, :amqp_test_target_pid)
-
-      try do
-        Queue.delete(chan, to_string(queue))
-      catch
-        _, _ -> :ok
-      end
     end)
 
     [
@@ -202,32 +215,37 @@ defmodule Ming.Gateway.AMQP.ConsumerTest do
       consumer_name = unique_name(:cancel_consumer)
       process_pool_name = unique_name(:cancel_process_pool)
 
-      start_supervised!(
-        %{id: process_pool_name, start: {NimblePool, :start_link, [[
-          name: process_pool_name,
-          worker: {MessageProcess, command_process: TestAMQPProcessor},
-          pool_size: 1
-        ]]}}
-      )
+      start_supervised!(%{
+        id: process_pool_name,
+        start:
+          {NimblePool, :start_link,
+           [
+             [
+               name: process_pool_name,
+               worker: {MessageProcess, command_process: TestAMQPProcessor},
+               pool_size: 1
+             ]
+           ]}
+      })
 
       pid =
-        start_supervised!(
-          %{
-            id: consumer_name,
-            start: {Consumer, :start_link, [
-              [
-                name: consumer_name,
-                gateway_name: gateway_name,
-                topic_or_queue: queue,
-                routing_key: routing_key,
-                process_pool_name: process_pool_name,
-                command_processor: TestAMQPProcessor,
-                buffer_size: 1,
-                number_of_performers: 1
-              ]
-            ]}
-          }
-        )
+        start_supervised!(%{
+          id: consumer_name,
+          start:
+            {Consumer, :start_link,
+             [
+               [
+                 name: consumer_name,
+                 gateway_name: gateway_name,
+                 topic_or_queue: queue,
+                 routing_key: routing_key,
+                 process_pool_name: process_pool_name,
+                 command_processor: TestAMQPProcessor,
+                 buffer_size: 1,
+                 number_of_performers: 1
+               ]
+             ]}
+        })
 
       ref = Process.monitor(pid)
 

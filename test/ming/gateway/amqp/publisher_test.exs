@@ -41,12 +41,28 @@ defmodule Ming.Gateway.AMQP.PublisherTest do
       pool_size: 1
     ]
 
-    start_supervised!(
-      %{id: pool_name, start: {NimblePool, :start_link, [pool_opts]}}
-    )
+    start_supervised!(%{id: pool_name, start: {NimblePool, :start_link, [pool_opts]}})
 
     context
     |> Map.put(:pool_name, pool_name)
+  end
+
+  defp declare_exchange_and_queue(chan, exchange, queue, routing_key) do
+    exchange_str = to_string(exchange)
+    queue_str = to_string(queue)
+
+    :ok = Exchange.declare(chan, exchange_str, :topic, durable: true)
+    assert {:ok, _} = Queue.declare(chan, queue_str, durable: true)
+    :ok = Queue.bind(chan, queue_str, exchange_str, routing_key: to_string(routing_key))
+
+    on_exit(fn ->
+      try do
+        Queue.delete(chan, queue_str)
+        Exchange.delete(chan, exchange_str)
+      catch
+        _, _ -> :ok
+      end
+    end)
   end
 
   setup %{exchange: exchange} do
@@ -71,9 +87,7 @@ defmodule Ming.Gateway.AMQP.PublisherTest do
       exchange_str = to_string(exchange)
       routing_key_str = to_string(routing_key)
 
-      :ok = Exchange.declare(chan, exchange_str, :topic, durable: true)
-      assert {:ok, _} = Queue.declare(chan, to_string(queue), durable: true)
-      :ok = Queue.bind(chan, to_string(queue), exchange_str, routing_key: routing_key_str)
+      declare_exchange_and_queue(chan, exchange, queue, routing_key)
 
       payload = "hello publisher"
 
@@ -86,6 +100,7 @@ defmodule Ming.Gateway.AMQP.PublisherTest do
 
   describe "worker lifecycle" do
     test "idle timeout removes idle worker", %{
+      amqp_chan: chan,
       context: %{
         gateway_name: gateway_name,
         routing_key: routing_key
@@ -94,6 +109,14 @@ defmodule Ming.Gateway.AMQP.PublisherTest do
       pool_name = unique_name(:idle_pool)
       exchange_str = to_string(unique_name(:idle_exchange))
       routing_key_str = to_string(routing_key)
+
+      on_exit(fn ->
+        try do
+          Exchange.delete(chan, exchange_str)
+        catch
+          _, _ -> :ok
+        end
+      end)
 
       worker_opts = [
         name: pool_name,
@@ -110,9 +133,7 @@ defmodule Ming.Gateway.AMQP.PublisherTest do
         max_idle_pings: 1
       ]
 
-      start_supervised!(
-        %{id: pool_name, start: {NimblePool, :start_link, [pool_opts]}}
-      )
+      start_supervised!(%{id: pool_name, start: {NimblePool, :start_link, [pool_opts]}})
 
       # Trigger a checkout/checkin to create a worker
       assert :ok =

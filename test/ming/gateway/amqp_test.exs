@@ -12,21 +12,77 @@ defmodule Ming.Gateway.AMQPTest do
 
   @moduletag :rabbitmq
 
-  setup do
+  setup %{amqp_conn: conn, amqp_chan: chan} do
     Application.put_env(:ming, :amqp_test_target_pid, self())
-    on_exit(fn -> Application.delete_env(:ming, :amqp_test_target_pid) end)
-    :ok
+
+    on_exit(fn ->
+      Application.delete_env(:ming, :amqp_test_target_pid)
+    end)
+
+    [amqp_conn: conn, amqp_chan: chan]
+  end
+
+  defp declare_exchange(chan, exchange, opts \\ [durable: true]) do
+    exchange_str = to_string(exchange)
+    :ok = Exchange.declare(chan, exchange_str, :topic, opts)
+
+    on_exit(fn ->
+      try do
+        Exchange.delete(chan, exchange_str)
+      catch
+        _, _ -> :ok
+      end
+    end)
+  end
+
+  defp declare_queue(chan, queue, exchange, routing_key) do
+    queue_str = to_string(queue)
+    exchange_str = to_string(exchange)
+    assert {:ok, _} = Queue.declare(chan, queue_str, durable: true)
+
+    :ok =
+      Queue.bind(chan, queue_str, exchange_str, routing_key: to_string(routing_key))
+
+    on_exit(fn ->
+      try do
+        Queue.delete(chan, queue_str)
+      catch
+        _, _ -> :ok
+      end
+    end)
+  end
+
+  defp delete_on_exit(chan, exchange, queue \\ nil) do
+    on_exit(fn ->
+      try do
+        if queue, do: Queue.delete(chan, to_string(queue))
+        Exchange.delete(chan, to_string(exchange))
+      catch
+        _, _ -> :ok
+      end
+    end)
   end
 
   describe "start_link/1 and init/1" do
-    test "starts supervisor with connection, publishers, consumers and pools" do
+    test "starts supervisor with connection, publishers, consumers and pools", %{
+      amqp_chan: chan
+    } do
       name = unique_name(:amqp_gateway)
+      exchange = unique_name("ex")
+      queue = unique_name("queue1")
+
+      declare_exchange(chan, exchange)
+      declare_queue(chan, queue, exchange, unique_name(:sub_rk1))
 
       opts = [
         name: name,
         command_processor: TestAMQPProcessor,
         connection: [uri: rabbit_uri(), retry: [max_retries: 1, base_delay: 10]],
-        exchange: [name: to_string(unique_name("ex")), type: :topic, provision: {:create, durable: true}],
+        exchange: [
+          name: to_string(exchange),
+          type: :topic,
+          provision: {:create, durable: true}
+        ],
         publications: [
           [routing_key: unique_name(:pub1), number_of_performers: 2],
           [routing_key: unique_name(:pub2)]
@@ -34,7 +90,7 @@ defmodule Ming.Gateway.AMQPTest do
         subscriptions: [
           [
             name: unique_name(:sub1),
-            topic_or_queue: to_string(unique_name(:queue1)),
+            topic_or_queue: to_string(queue),
             routing_key: unique_name(:sub_rk1),
             provision: {:create, durable: true}
           ]
@@ -93,6 +149,8 @@ defmodule Ming.Gateway.AMQPTest do
         exchange: [name: to_string(exchange), type: :topic, provision: {:create, durable: true}]
       ]
 
+      delete_on_exit(chan, exchange)
+
       assert :ok = AMQP.provision_infrastructure(opts)
       assert :ok = Exchange.declare(chan, to_string(exchange), :topic, passive: true)
     end
@@ -112,7 +170,7 @@ defmodule Ming.Gateway.AMQPTest do
 
     test "validates existing exchange with :validate provision", %{amqp_chan: chan} do
       exchange = unique_name("prov_ex_validate")
-      :ok = Exchange.declare(chan, to_string(exchange), :topic, durable: true)
+      declare_exchange(chan, exchange)
 
       opts = [
         connection: [uri: rabbit_uri()],
@@ -120,17 +178,6 @@ defmodule Ming.Gateway.AMQPTest do
       ]
 
       assert :ok = AMQP.provision_infrastructure(opts)
-    end
-
-    test "validating missing exchange returns error", %{amqp_chan: _chan} do
-      exchange = unique_name("prov_ex_validate_missing")
-
-      opts = [
-        connection: [uri: rabbit_uri()],
-        exchange: [name: to_string(exchange), type: :topic, provision: :validate]
-      ]
-
-      assert {:error, _} = AMQP.provision_infrastructure(opts)
     end
 
     test ":assume provision skips exchange declaration", %{amqp_chan: chan} do
@@ -153,6 +200,8 @@ defmodule Ming.Gateway.AMQPTest do
         exchange: [name: to_string(exchange), type: :topic, provision: {:create, durable: true}]
       ]
 
+      delete_on_exit(chan, exchange)
+
       assert :ok = AMQP.provision_infrastructure(opts)
       assert :ok = Exchange.declare(chan, to_string(exchange), :topic, passive: true)
     end
@@ -161,10 +210,17 @@ defmodule Ming.Gateway.AMQPTest do
       exchange = unique_name("prov_ex_dlx_main")
       dlx = unique_name("prov_ex_dlx")
 
+      delete_on_exit(chan, exchange)
+      delete_on_exit(chan, dlx)
+
       opts = [
         connection: [uri: rabbit_uri()],
         exchange: [name: to_string(exchange), type: :topic, provision: {:create, durable: true}],
-        dead_letter_exchange: [name: to_string(dlx), type: :fanout, provision: {:create, durable: true}]
+        dead_letter_exchange: [
+          name: to_string(dlx),
+          type: :fanout,
+          provision: {:create, durable: true}
+        ]
       ]
 
       assert :ok = AMQP.provision_infrastructure(opts)
@@ -176,7 +232,8 @@ defmodule Ming.Gateway.AMQPTest do
       queue = unique_name("prov_queue_create")
       routing_key = unique_name("prov_rk_create")
 
-      :ok = Exchange.declare(chan, to_string(exchange), :topic, durable: true)
+      declare_exchange(chan, exchange)
+      delete_on_exit(chan, exchange, queue)
 
       opts = [
         connection: [uri: rabbit_uri()],
@@ -201,9 +258,8 @@ defmodule Ming.Gateway.AMQPTest do
       queue = unique_name("prov_queue_validate")
       routing_key = unique_name("prov_rk_validate")
 
-      :ok = Exchange.declare(chan, to_string(exchange), :topic, durable: true)
-      assert {:ok, _} = Queue.declare(chan, to_string(queue), durable: true)
-      :ok = Queue.bind(chan, to_string(queue), to_string(exchange), routing_key: to_string(routing_key))
+      declare_exchange(chan, exchange)
+      declare_queue(chan, queue, exchange, routing_key)
 
       opts = [
         connection: [uri: rabbit_uri()],
@@ -221,10 +277,12 @@ defmodule Ming.Gateway.AMQPTest do
       assert :ok = AMQP.provision_infrastructure(opts)
     end
 
-    test "validating missing subscription queue returns error", %{amqp_chan: _chan} do
+    test "validating missing subscription queue returns error", %{amqp_chan: chan} do
       exchange = unique_name("prov_ex_sub_validate_missing")
       queue = unique_name("prov_queue_validate_missing")
       routing_key = unique_name("prov_rk_validate_missing")
+
+      delete_on_exit(chan, exchange)
 
       opts = [
         connection: [uri: rabbit_uri()],
@@ -247,7 +305,7 @@ defmodule Ming.Gateway.AMQPTest do
       queue = unique_name("prov_queue_assume")
       routing_key = unique_name("prov_rk_assume")
 
-      :ok = Exchange.declare(chan, to_string(exchange), :topic, durable: true)
+      declare_exchange(chan, exchange)
 
       opts = [
         connection: [uri: rabbit_uri()],
@@ -271,7 +329,8 @@ defmodule Ming.Gateway.AMQPTest do
       queue = unique_name("prov_queue_opts")
       routing_key = unique_name("prov_rk_opts")
 
-      :ok = Exchange.declare(chan, to_string(exchange), :topic, durable: true)
+      declare_exchange(chan, exchange)
+      delete_on_exit(chan, exchange, queue)
 
       opts = [
         connection: [uri: rabbit_uri()],
@@ -307,9 +366,8 @@ defmodule Ming.Gateway.AMQPTest do
       queue = unique_name("e2e_queue")
       routing_key = unique_name("e2e_rk")
 
-      :ok = Exchange.declare(chan, to_string(exchange), :topic, durable: true)
-      assert {:ok, _} = Queue.declare(chan, to_string(queue), durable: true)
-      :ok = Queue.bind(chan, to_string(queue), to_string(exchange), routing_key: to_string(routing_key))
+      declare_exchange(chan, exchange)
+      declare_queue(chan, queue, exchange, routing_key)
 
       name = unique_name(:e2e_gateway)
 

@@ -20,12 +20,12 @@ if Code.ensure_loaded?(AMQP) do
     """
     @spec publish(atom(), String.t(), String.t(), binary(), keyword()) ::
             :ok | {:error, any()}
-  def publish(pool_name, exchange, routing_key, payload, opts) do
-    NimblePool.checkout!(pool_name, :publish, fn _ref, channel ->
-      result = Basic.publish(channel, exchange, routing_key, payload, opts)
-      {result, %{channel: channel, last_usage: DateTime.utc_now()}}
-    end)
-  end
+    def publish(pool_name, exchange, routing_key, payload, opts) do
+      NimblePool.checkout!(pool_name, :publish, fn _ref, channel ->
+        result = Basic.publish(channel, exchange, routing_key, payload, opts)
+        {result, %{channel: channel, last_usage: DateTime.utc_now()}}
+      end)
+    end
 
     @impl NimblePool
     def init_pool(args) do

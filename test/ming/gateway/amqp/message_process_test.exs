@@ -36,13 +36,18 @@ defmodule Ming.Gateway.AMQP.MessageProcessTest do
 
     pool_name = unique_name(:message_process_pool)
 
-    start_supervised!(
-      %{id: pool_name, start: {NimblePool, :start_link, [[
-        name: pool_name,
-        worker: {MessageProcess, command_process: TestCommandProcessor},
-        pool_size: 1
-      ]]}}
-    )
+    start_supervised!(%{
+      id: pool_name,
+      start:
+        {NimblePool, :start_link,
+         [
+           [
+             name: pool_name,
+             worker: {MessageProcess, command_process: TestCommandProcessor},
+             pool_size: 1
+           ]
+         ]}
+    })
 
     on_exit(fn -> Application.delete_env(:ming, :amqp_test_target_pid) end)
 
@@ -56,21 +61,26 @@ defmodule Ming.Gateway.AMQP.MessageProcessTest do
   defp setup_queue(%{amqp_chan: chan, exchange: exchange}) do
     queue = unique_name(:mp_queue)
     routing_key = unique_name(:mp_rk)
+    queue_str = to_string(queue)
+    exchange_str = to_string(exchange)
 
     # Ensure a clean queue even if a previous test run left a durable queue behind.
     try do
-      Queue.delete(chan, to_string(queue))
+      Queue.delete(chan, queue_str)
     catch
       _, _ -> :ok
     end
 
-    :ok = Exchange.declare(chan, to_string(exchange), :topic, durable: true)
-    assert {:ok, _} = Queue.declare(chan, to_string(queue), durable: true)
-    :ok = Queue.bind(chan, to_string(queue), to_string(exchange), routing_key: to_string(routing_key))
+    :ok = Exchange.declare(chan, exchange_str, :topic, durable: true)
+    assert {:ok, _} = Queue.declare(chan, queue_str, durable: true)
+
+    :ok =
+      Queue.bind(chan, queue_str, exchange_str, routing_key: to_string(routing_key))
 
     on_exit(fn ->
       try do
-        Queue.delete(chan, to_string(queue))
+        Queue.delete(chan, queue_str)
+        Exchange.delete(chan, exchange_str)
       catch
         _, _ -> :ok
       end
@@ -80,7 +90,8 @@ defmodule Ming.Gateway.AMQP.MessageProcessTest do
   end
 
   describe "process/6" do
-    test ":ack removes message from queue", %{amqp_chan: chan, exchange: exchange, pool_name: pool_name} = context do
+    test ":ack removes message from queue",
+         %{amqp_chan: chan, exchange: exchange, pool_name: pool_name} = context do
       {queue, routing_key} = setup_queue(context)
 
       :ok = Basic.publish(chan, to_string(exchange), to_string(routing_key), "ack me")
@@ -110,7 +121,8 @@ defmodule Ming.Gateway.AMQP.MessageProcessTest do
       assert_receive {:processed, ^message, _opts, {:ok, :ack}}, 1_000
     end
 
-    test ":reject removes message from queue", %{amqp_chan: chan, exchange: exchange, pool_name: pool_name} = context do
+    test ":reject removes message from queue",
+         %{amqp_chan: chan, exchange: exchange, pool_name: pool_name} = context do
       {queue, routing_key} = setup_queue(context)
 
       :ok = Basic.publish(chan, to_string(exchange), to_string(routing_key), "reject me")
@@ -139,7 +151,8 @@ defmodule Ming.Gateway.AMQP.MessageProcessTest do
       assert {:empty, _} = Basic.get(chan, to_string(queue))
     end
 
-    test ":requeue keeps message in queue", %{amqp_chan: chan, exchange: exchange, pool_name: pool_name} = context do
+    test ":requeue keeps message in queue",
+         %{amqp_chan: chan, exchange: exchange, pool_name: pool_name} = context do
       {queue, routing_key} = setup_queue(context)
 
       :ok = Basic.publish(chan, to_string(exchange), to_string(routing_key), "requeue me")
@@ -168,7 +181,8 @@ defmodule Ming.Gateway.AMQP.MessageProcessTest do
       assert {:ok, "requeue me", _meta} = Basic.get(chan, to_string(queue))
     end
 
-    test "{:error, _} rejects message", %{amqp_chan: chan, exchange: exchange, pool_name: pool_name} = context do
+    test "{:error, _} rejects message",
+         %{amqp_chan: chan, exchange: exchange, pool_name: pool_name} = context do
       {queue, routing_key} = setup_queue(context)
 
       :ok = Basic.publish(chan, to_string(exchange), to_string(routing_key), "error me")
@@ -207,7 +221,9 @@ defmodule Ming.Gateway.AMQP.MessageProcessTest do
 
       TestCommandProcessor.set_result(:ack)
 
-      assert {:ok, :ack} = MessageProcess.process(pool_name, :ignored, nil, :test, message, :infinity)
+      assert {:ok, :ack} =
+               MessageProcess.process(pool_name, :ignored, nil, :test, message, :infinity)
+
       assert_receive {:processed, ^message, _opts, {:ok, :ack}}, 1_000
     end
   end

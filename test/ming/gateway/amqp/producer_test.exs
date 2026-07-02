@@ -34,9 +34,7 @@ defmodule Ming.Gateway.AMQP.ProducerTest do
       pool_size: 1
     ]
 
-    start_supervised!(
-      %{id: pool_name, start: {NimblePool, :start_link, [pool_opts]}}
-    )
+    start_supervised!(%{id: pool_name, start: {NimblePool, :start_link, [pool_opts]}})
 
     Map.put(context, :pool_name, pool_name)
   end
@@ -67,9 +65,30 @@ defmodule Ming.Gateway.AMQP.ProducerTest do
 
   defp declare_and_bind(%{amqp_chan: chan, exchange: exchange, context: context}) do
     queue = unique_name(:producer_queue)
-    :ok = Exchange.declare(chan, to_string(exchange), :topic, durable: true)
-    assert {:ok, _} = Queue.declare(chan, to_string(queue), durable: true)
-    :ok = Queue.bind(chan, to_string(queue), to_string(exchange), routing_key: to_string(context.routing_key))
+    queue_str = to_string(queue)
+    exchange_str = to_string(exchange)
+
+    try do
+      Queue.delete(chan, queue_str)
+    catch
+      _, _ -> :ok
+    end
+
+    :ok = Exchange.declare(chan, exchange_str, :topic, durable: true)
+    assert {:ok, _} = Queue.declare(chan, queue_str, durable: true)
+
+    :ok =
+      Queue.bind(chan, queue_str, exchange_str, routing_key: to_string(context.routing_key))
+
+    on_exit(fn ->
+      try do
+        Queue.delete(chan, queue_str)
+        Exchange.delete(chan, exchange_str)
+      catch
+        _, _ -> :ok
+      end
+    end)
+
     queue
   end
 
@@ -79,7 +98,12 @@ defmodule Ming.Gateway.AMQP.ProducerTest do
       exchange: exchange,
       context: %{pool_name: _pool_name, routing_key: routing_key}
     } do
-      queue = declare_and_bind(%{amqp_chan: chan, exchange: exchange, context: %{routing_key: routing_key}})
+      queue =
+        declare_and_bind(%{
+          amqp_chan: chan,
+          exchange: exchange,
+          context: %{routing_key: routing_key}
+        })
 
       message = %Message{
         id: "msg-1",
@@ -115,7 +139,12 @@ defmodule Ming.Gateway.AMQP.ProducerTest do
       exchange: exchange,
       context: %{pool_name: _pool_name, routing_key: routing_key}
     } do
-      queue = declare_and_bind(%{amqp_chan: chan, exchange: exchange, context: %{routing_key: routing_key}})
+      queue =
+        declare_and_bind(%{
+          amqp_chan: chan,
+          exchange: exchange,
+          context: %{routing_key: routing_key}
+        })
 
       messages =
         for i <- 1..3 do
@@ -135,7 +164,9 @@ defmodule Ming.Gateway.AMQP.ProducerTest do
 
       publication = [routing_key: routing_key]
 
-      assert [_, _, _] = Producer.publish(messages, gateway: gateway_config, publication: publication)
+      assert [_, _, _] =
+               Producer.publish(messages, gateway: gateway_config, publication: publication)
+
       Process.sleep(100)
 
       for i <- 1..3 do
@@ -149,7 +180,12 @@ defmodule Ming.Gateway.AMQP.ProducerTest do
       exchange: exchange,
       context: %{pool_name: _pool_name, routing_key: routing_key}
     } do
-      queue = declare_and_bind(%{amqp_chan: chan, exchange: exchange, context: %{routing_key: routing_key}})
+      queue =
+        declare_and_bind(%{
+          amqp_chan: chan,
+          exchange: exchange,
+          context: %{routing_key: routing_key}
+        })
 
       message = %Message{
         id: "ce-msg",
@@ -189,7 +225,12 @@ defmodule Ming.Gateway.AMQP.ProducerTest do
       exchange: exchange,
       context: %{pool_name: _pool_name, routing_key: routing_key}
     } do
-      queue = declare_and_bind(%{amqp_chan: chan, exchange: exchange, context: %{routing_key: routing_key}})
+      queue =
+        declare_and_bind(%{
+          amqp_chan: chan,
+          exchange: exchange,
+          context: %{routing_key: routing_key}
+        })
 
       message = %Message{
         id: "json-msg",
@@ -222,7 +263,12 @@ defmodule Ming.Gateway.AMQP.ProducerTest do
       exchange: exchange,
       context: %{pool_name: _pool_name, routing_key: routing_key}
     } do
-      queue = declare_and_bind(%{amqp_chan: chan, exchange: exchange, context: %{routing_key: routing_key}})
+      queue =
+        declare_and_bind(%{
+          amqp_chan: chan,
+          exchange: exchange,
+          context: %{routing_key: routing_key}
+        })
 
       message = %Message{
         id: "defaults-msg",
