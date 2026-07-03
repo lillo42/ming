@@ -99,15 +99,20 @@ MyApp.EventRouter.publish(UserCreated, %UserCreated{id: 123}, dispatch_strategy:
 
 ### 4. Aggregating Routers with CommandProcessor
 
-For larger applications, you can aggregate multiple routers into a single entry point using a `CommandProcessor`. This builds a compile-time lookup table to automatically forward payloads to the correct underlying router.
+For larger applications, you can aggregate multiple routers into a single entry point using a `CommandProcessor`. This builds a compile-time lookup table to automatically forward payloads to the correct underlying router and can start the messaging gateway supervision tree for you.
 
 ```elixir
 defmodule MyApp.CommandProcessor do
-  use Ming.CommandProcessor
+  use Ming.CommandProcessor, otp_app: :my_app
 
   router MyApp.UserRouter
   router MyApp.EventRouter
 end
+
+# Add it to your application supervision tree
+children = [
+  MyApp.CommandProcessor
+]
 
 # The processor automatically routes to UserRouter based on the struct
 MyApp.CommandProcessor.send(%CreateUser{name: "Jane"})
@@ -123,34 +128,27 @@ MyApp.CommandProcessor.publish(%UserCreated{id: 123}, dispatch_strategy: :parall
 
 Ming supports messaging gateways for producing and consuming messages through external brokers. An in-memory gateway is included for local development and testing.
 
+Gateways are configured under the command processor module in your application config and started automatically when the command processer starts.
+
 ### In-Memory Gateway
 
 `Ming.Gateway.InMemory` routes messages directly inside the BEAM, with no external infrastructure. It is useful for local development, CI, and testing.
 
 ```elixir
-defmodule MyApp.GatewaySupervisor do
-  use Supervisor
-
-  def init(_opts) do
-    children = [
-      {Ming.Gateway.Supervisor, [
-        [
-          adapter: Ming.Gateway.InMemory,
-          name: :my_in_memory_gateway,
-          command_processor: MyApp.CommandProcessor,
-          publications: [
-            [routing_key: :order_created]
-          ],
-          subscriptions: [
-            [name: :orders, routing_key: :order_created]
-          ]
-        ]
-      ]}
+# config/runtime.exs or config/config.exs
+config :my_app, MyApp.CommandProcessor,
+  gateways: [
+    [
+      adapter: Ming.Gateway.InMemory,
+      name: :my_in_memory_gateway,
+      publications: [
+        [routing_key: :order_created]
+      ],
+      subscriptions: [
+        [name: :orders, routing_key: :order_created]
+      ]
     ]
-
-    Supervisor.init(children, strategy: :one_for_one)
-  end
-end
+  ]
 ```
 
 You can publish messages through the in-memory gateway using `Ming.CommandProcessor.post/2`:
@@ -159,50 +157,41 @@ You can publish messages through the in-memory gateway using `Ming.CommandProces
 MyApp.CommandProcessor.post(%OrderCreated{id: 123})
 ```
 
-Consumed messages are dispatched through the configured `command_processor` using the same `:ming_consume_message` pipeline as the AMQP gateway.
+Consumed messages are dispatched through the configured command processor using the same `:ming_consume_message` pipeline as the AMQP gateway.
 
 ### AMQP Gateway
 
 `Ming.Gateway.AMQP` connects to an AMQP broker (RabbitMQ, etc.) for production messaging. It manages connections, publisher pools, and consumers, and provisions exchanges and queues before startup.
 
 ```elixir
-defmodule MyApp.GatewaySupervisor do
-  use Supervisor
-
-  def init(_opts) do
-    children = [
-      {Ming.Gateway.Supervisor, [
+# config/runtime.exs or config/config.exs
+config :my_app, MyApp.CommandProcessor,
+  gateways: [
+    [
+      adapter: Ming.Gateway.AMQP,
+      name: :my_amqp_gateway,
+      connection: [
+        uri: "amqp://guest:guest@localhost",
+        retry: [max_retries: 5, base_delay: 1_000]
+      ],
+      exchange: [
+        name: "events",
+        type: :topic,
+        provision: :create
+      ],
+      publications: [
+        [routing_key: :order_created, number_of_performers: 2]
+      ],
+      subscriptions: [
         [
-          adapter: Ming.Gateway.AMQP,
-          name: :my_amqp_gateway,
-          command_processor: MyApp.CommandProcessor,
-          connection: [
-            uri: "amqp://guest:guest@localhost",
-            retry: [max_retries: 5, base_delay: 1_000]
-          ],
-          exchange: [
-            name: "events",
-            type: :topic,
-            provision: :create
-          ],
-          publications: [
-            [routing_key: :order_created, number_of_performers: 2]
-          ],
-          subscriptions: [
-            [
-              name: :orders,
-              topic_or_queue: "orders.queue",
-              routing_key: :order_created,
-              provision: :create
-            ]
-          ]
+          name: :orders,
+          topic_or_queue: "orders.queue",
+          routing_key: :order_created,
+          provision: :create
         ]
-      ]}
+      ]
     ]
-
-    Supervisor.init(children, strategy: :one_for_one)
-  end
-end
+  ]
 ```
 
 Add `:amqp` and `:nimble_pool` to your dependencies to use the AMQP gateway:

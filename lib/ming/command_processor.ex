@@ -1,15 +1,17 @@
-defmodule Ming.Application do
+defmodule Ming.CommandProcessor do
   @moduledoc """
-  Entry point and supervisor for a Ming application.
+  Macro-based command processor that aggregates multiple routers and starts
+  the messaging gateway supervision tree.
 
-  A `Ming.Application` aggregates routers (command dispatch), reads gateway
-  configuration from the OTP application environment, and starts the gateway
-  supervision tree.
+  A `Ming.CommandProcessor` module is both the command dispatch entry point
+  and a supervisor. It builds routing tables at compile time, dispatches
+  `send/2`, `publish/2` and `post/2` calls to the correct router, and starts
+  the configured messaging gateways on startup.
 
   ## Example
 
-      defmodule MyApp.Application do
-        use Ming.Application, otp_app: :my_app
+      defmodule MyApp.CommandProcessor do
+        use Ming.CommandProcessor, otp_app: :my_app
 
         router(MyApp.Router)
       end
@@ -17,12 +19,12 @@ defmodule Ming.Application do
   Then add it to your supervision tree:
 
       children = [
-        MyApp.Application
+        MyApp.CommandProcessor
       ]
 
   And configure the gateways:
 
-      config :my_app, MyApp.Application,
+      config :my_app, MyApp.CommandProcessor,
         gateways: [
           [
             adapter: Ming.Gateway.AMQP,
@@ -42,7 +44,7 @@ defmodule Ming.Application do
   use Supervisor
 
   @doc """
-  Injects router aggregation macros and application options.
+  Injects router aggregation macros and command processor options.
   """
   defmacro __using__(opts) do
     otp_app = Keyword.get(opts, :otp_app, :ming)
@@ -61,11 +63,14 @@ defmodule Ming.Application do
       Module.register_attribute(__MODULE__, :routers, accumulate: true)
 
       @routers Ming.Message.Router
+
+      @doc false
+      def __ming_otp_app__, do: @otp_app
     end
   end
 
   @doc """
-  Registers a router and all its routing keys into the application.
+  Registers a router and all its routing keys into the command processor.
   """
   defmacro router(router_ast) do
     router = Macro.expand(router_ast, __CALLER__)
@@ -78,9 +83,9 @@ defmodule Ming.Application do
   end
 
   @doc """
-  Starts the application supervisor linked to the current process.
+  Starts the command processor supervisor linked to the current process.
 
-  The application name is registered globally under `__MODULE__` by default.
+  The processor name is registered globally under `__MODULE__` by default.
   A custom name can be provided with the `:name` option.
   """
   @spec start_link(keyword()) :: Supervisor.on_start()
@@ -91,8 +96,14 @@ defmodule Ming.Application do
 
   @impl true
   def init(opts) do
-    module = Keyword.get(opts, :__module__, __MODULE__)
-    otp_app = Keyword.get(opts, :otp_app, :ming)
+    module = __MODULE__
+
+    otp_app =
+      if Keyword.has_key?(opts, :otp_app) do
+        Keyword.fetch!(opts, :otp_app)
+      else
+        apply_module(module, :__ming_otp_app__, [], :ming)
+      end
 
     gateways =
       otp_app
@@ -105,6 +116,14 @@ defmodule Ming.Application do
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  defp apply_module(module, function, args, default) do
+    if function_exported?(module, function, length(args)) do
+      apply(module, function, args)
+    else
+      default
+    end
   end
 
   @doc false

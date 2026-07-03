@@ -7,9 +7,9 @@ defmodule Ming.Gateway.SupervisorTest do
     test "returns a valid supervisor spec for a valid gateway config" do
       opts = [
         [
-           adapter: FakeGatewayAdapter,
-           name: :test_gateway,
-           command_processor: FakeApplicationCommandProcessor,
+          adapter: FakeGatewayAdapter,
+          name: :test_gateway,
+          command_processor: FakeApplicationCommandProcessor,
           connection: [uri: "amqp://localhost"],
           exchange: [name: "events", type: :topic],
           publications: [[routing_key: :order_created]],
