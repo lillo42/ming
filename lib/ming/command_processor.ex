@@ -1,26 +1,76 @@
 defmodule Ming.CommandProcessor do
   @moduledoc """
-  Macro-based command processor that aggregates multiple routers.
+  Macro-based command processor that aggregates multiple routers and starts
+  the messaging gateway supervision tree.
 
-  It builds routing tables at compile time and dispatches `send/2` and
-  `publish/2` calls to the correct router module.
+  A `Ming.CommandProcessor` module is both the command dispatch entry point
+  and a supervisor. It builds routing tables at compile time, dispatches
+  `send/2`, `publish/2` and `post/2` calls to the correct router, and starts
+  the configured messaging gateways on startup.
+
+  ## Example
+
+      defmodule MyApp.CommandProcessor do
+        use Ming.CommandProcessor, otp_app: :my_app
+
+        router(MyApp.Router)
+      end
+
+  Then add it to your supervision tree:
+
+      children = [
+        MyApp.CommandProcessor
+      ]
+
+  And configure the gateways:
+
+      config :my_app, MyApp.CommandProcessor,
+        gateways: [
+          [
+            adapter: Ming.Gateway.AMQP,
+            name: :my_amqp,
+            connection: [uri: "amqp://guest:guest@localhost"],
+            exchange: [name: "events", type: :topic],
+            publications: [
+              [routing_key: :order_created, number_of_performers: 2]
+            ],
+            subscriptions: [
+              [name: :orders, topic_or_queue: "orders.queue", routing_key: :order_created]
+            ]
+          ]
+        ]
   """
+
+  use Supervisor
 
   @doc """
-  Injects router aggregation macros.
+  Injects router aggregation macros and command processor options.
   """
-  defmacro __using__(_opts) do
+  defmacro __using__(opts) do
+    otp_app = Keyword.get(opts, :otp_app, :ming)
+
+    default_message_mapper =
+      Keyword.get(opts, :default_message_mapper, Ming.Message.Mapper.Json)
+
     quote do
       import unquote(__MODULE__)
 
       @before_compile unquote(__MODULE__)
 
+      @otp_app unquote(otp_app)
+      @default_message_mapper unquote(default_message_mapper)
+
       Module.register_attribute(__MODULE__, :routers, accumulate: true)
+
+      @routers Ming.Message.Router
+
+      @doc false
+      def __ming_otp_app__, do: @otp_app
     end
   end
 
   @doc """
-  Registers a router and all its routing keys into the processor.
+  Registers a router and all its routing keys into the command processor.
   """
   defmacro router(router_ast) do
     router = Macro.expand(router_ast, __CALLER__)
@@ -32,9 +82,61 @@ defmodule Ming.CommandProcessor do
     end
   end
 
+  @doc """
+  Starts the command processor supervisor linked to the current process.
+
+  The processor name is registered globally under `__MODULE__` by default.
+  A custom name can be provided with the `:name` option.
+  """
+  @spec start_link(keyword()) :: Supervisor.on_start()
+  def start_link(opts \\ []) do
+    name = Keyword.get(opts, :name, __MODULE__)
+    Supervisor.start_link(__MODULE__, opts, name: name)
+  end
+
+  @impl true
+  def init(opts) do
+    module = __MODULE__
+
+    otp_app =
+      if Keyword.has_key?(opts, :otp_app) do
+        Keyword.fetch!(opts, :otp_app)
+      else
+        apply_module(module, :__ming_otp_app__, [], :ming)
+      end
+
+    gateways =
+      otp_app
+      |> Application.get_env(module, [])
+      |> Keyword.get(:gateways, [])
+      |> Enum.map(&Keyword.put(&1, :command_processor, module))
+
+    children = [
+      {Ming.Gateway.Supervisor, gateways}
+    ]
+
+    Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  defp apply_module(module, function, args, default) do
+    if function_exported?(module, function, length(args)) do
+      apply(module, function, args)
+    else
+      default
+    end
+  end
+
   @doc false
   defmacro __before_compile__(env) do
-    routers = Module.get_attribute(env.module, :routers) || []
+    routers =
+      env.module
+      |> Module.get_attribute(:routers)
+      |> List.wrap()
+      |> Enum.flat_map(fn
+        {_routing_key, _router} = entry -> [entry]
+        router when is_atom(router) -> Enum.map(router.__register_routing_keys__(), &{&1, router})
+      end)
+
     routing_key_by_module = Enum.group_by(routers, &elem(&1, 0), &elem(&1, 1))
 
     send_clauses =
@@ -114,10 +216,44 @@ defmodule Ming.CommandProcessor do
       unquote(publish_clauses)
       defp do_publish(_routing_key, _request, _opts), do: {:error, :unregistered_command}
 
+      @doc """
+      Publishes a request through the configured messaging gateway.
+
+      Accepts either a routing key atom or a keyword list of options. When a
+      keyword list is given, `:routing_key` is resolved from the request struct
+      unless already provided.
+      """
+      @spec post(any(), keyword(Ming.send_opts()) | Ming.routing_key()) :: Ming.resp()
+      def post(request, opts \\ [])
+
+      def post(request, routing_key) when is_atom(routing_key) do
+        do_post(request, routing_key: routing_key)
+      end
+
+      def post(request, opts) when is_list(opts) do
+        opts = Keyword.put_new(opts, :routing_key, resolve_routing_key(opts, request))
+        do_post(request, opts)
+      end
+
+      defp do_post(request, opts) do
+        metadata =
+          Keyword.get(opts, :metadata, %{})
+          |> Map.put(:message_routing_key, Keyword.fetch!(opts, :routing_key))
+          |> Map.put(:default_message_mapper, @default_message_mapper)
+          |> Map.put(:ming_application, __MODULE__)
+
+        opts =
+          opts
+          |> Keyword.put(:metadata, metadata)
+          |> Keyword.put(:routing_key, :ming_produce_message)
+
+        __MODULE__.send(request, opts)
+      end
+
       defp resolve_routing_key(opts, request) when is_struct(request),
         do: Keyword.get(opts, :routing_key, request.__struct__)
 
-      defp resolve_routing_key(opts, request), do: Keyword.fetch!(opts, :routing_key)
+      defp resolve_routing_key(opts, _request), do: Keyword.fetch!(opts, :routing_key)
 
       defp extract_stream_resp({:ok, res}), do: res
       defp extract_stream_resp({:exit, reason}), do: {:error, reason}

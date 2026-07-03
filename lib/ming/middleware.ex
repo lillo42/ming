@@ -38,7 +38,6 @@ defmodule Ming.Middleware do
 
   @doc """
   Runs after the handler execution stage.
-
   This is called even if the pipeline was halted by this middleware's
   `before_handle/1`, allowing for cleanup or logging.
   """

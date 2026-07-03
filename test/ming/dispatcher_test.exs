@@ -88,6 +88,7 @@ defmodule Ming.DispatcherTest do
       result = Dispatcher.dispatch(context)
       assert Context.halted?(result)
       assert Context.response(result) == {:error, :halted}
+
       # CustomMiddleware's after_handle IS called even when the pipeline halts
       assert result.assigns.after_called == true
     end

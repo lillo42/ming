@@ -1,6 +1,6 @@
 # Ming
 
-Ming is a lightweight, `Plug`-inspired pipeline framework for routing Commands, Queries, and Events in Elixir. 
+Ming is a lightweight, `Plug`-inspired pipeline framework for routing Commands, Queries, and Events in Elixir.
 
 While initially inspired by C# frameworks like Brighter, Ming has been completely rewritten to embrace Elixir's functional nature, relying on highly optimized compile-time routing and simple data transformations via `%Ming.Context{}`.
 
@@ -12,8 +12,9 @@ Provides support for:
 - A flexible, context-driven Middleware pipeline (similar to Plug)
 - First-class `:telemetry` and structured logging integration
 - Configurable execution timeouts
+- In-memory messaging gateway for local development and testing
 
-Requires Erlang/OTP v27 and Elixir v1.20 or later.
+Requires Erlang/OTP v27 and Elixir v1.18 or later.
 
 ## Installation
 
@@ -98,15 +99,20 @@ MyApp.EventRouter.publish(UserCreated, %UserCreated{id: 123}, dispatch_strategy:
 
 ### 4. Aggregating Routers with CommandProcessor
 
-For larger applications, you can aggregate multiple routers into a single entry point using a `CommandProcessor`. This builds a compile-time lookup table to automatically forward payloads to the correct underlying router.
+For larger applications, you can aggregate multiple routers into a single entry point using a `CommandProcessor`. This builds a compile-time lookup table to automatically forward payloads to the correct underlying router and can start the messaging gateway supervision tree for you.
 
 ```elixir
 defmodule MyApp.CommandProcessor do
-  use Ming.CommandProcessor
+  use Ming.CommandProcessor, otp_app: :my_app
 
   router MyApp.UserRouter
   router MyApp.EventRouter
 end
+
+# Add it to your application supervision tree
+children = [
+  MyApp.CommandProcessor
+]
 
 # The processor automatically routes to UserRouter based on the struct
 MyApp.CommandProcessor.send(%CreateUser{name: "Jane"})
@@ -118,6 +124,94 @@ MyApp.CommandProcessor.send(%{payload: "data"}, routing_key: :custom_key)
 MyApp.CommandProcessor.publish(%UserCreated{id: 123}, dispatch_strategy: :parallel)
 ```
 
+## Gateways
+
+Ming supports messaging gateways for producing and consuming messages through external brokers. An in-memory gateway is included for local development and testing.
+
+Gateways are configured under the command processor module in your application config and started automatically when the command processer starts.
+
+### In-Memory Gateway
+
+`Ming.Gateway.InMemory` routes messages directly inside the BEAM, with no external infrastructure. It is useful for local development, CI, and testing.
+
+```elixir
+# config/runtime.exs or config/config.exs
+config :my_app, MyApp.CommandProcessor,
+  gateways: [
+    [
+      adapter: Ming.Gateway.InMemory,
+      name: :my_in_memory_gateway,
+      publications: [
+        [routing_key: :order_created]
+      ],
+      subscriptions: [
+        [name: :orders, routing_key: :order_created]
+      ]
+    ]
+  ]
+```
+
+You can publish messages through the in-memory gateway using `post/2` on your command processor module:
+
+```elixir
+MyApp.CommandProcessor.post(%OrderCreated{id: 123})
+```
+
+Consumed messages are dispatched through the configured command processor using the same `:ming_consume_message` pipeline as the AMQP gateway.
+
+### AMQP Gateway
+
+`Ming.Gateway.AMQP` connects to an AMQP broker (RabbitMQ, etc.) for production messaging. It manages connections, publisher pools, and consumers, and provisions exchanges and queues before startup.
+
+```elixir
+# config/runtime.exs or config/config.exs
+config :my_app, MyApp.CommandProcessor,
+  gateways: [
+    [
+      adapter: Ming.Gateway.AMQP,
+      name: :my_amqp_gateway,
+      connection: [
+        uri: "amqp://guest:guest@localhost",
+        retry: [max_retries: 5, base_delay: 1_000]
+      ],
+      exchange: [
+        name: "events",
+        type: :topic,
+        provision: :create
+      ],
+      publications: [
+        [routing_key: :order_created, number_of_performers: 2]
+      ],
+      subscriptions: [
+        [
+          name: :orders,
+          topic_or_queue: "orders.queue",
+          routing_key: :order_created,
+          provision: :create
+        ]
+      ]
+    ]
+  ]
+```
+
+Add `:amqp` and `:nimble_pool` to your dependencies to use the AMQP gateway:
+
+```elixir
+defp deps do
+  [
+    {:ming, "~> 0.2.0"},
+    {:amqp, "~> 4.1"},
+    {:nimble_pool, "~> 1.1"}
+  ]
+end
+```
+
+Publishing and consuming work the same way as the in-memory gateway:
+
+```elixir
+MyApp.CommandProcessor.post(%OrderCreated{id: 123})
+```
+
 ## Middleware Pipeline
 
 Ming's middleware engine acts very much like Elixir's `Plug`. Middlewares implement the `Ming.Middleware` behaviour and receive the `Ming.Context`.
@@ -127,6 +221,7 @@ You can modify the context, share data between middlewares using `Context.assign
 ```elixir
 defmodule MyApp.LoggingMiddleware do
   @behaviour Ming.Middleware
+
 
   def before_handle(context) do
     IO.puts("Starting execution for #{context.routing_key}")
@@ -148,9 +243,9 @@ Ming natively integrates with Erlang's `:telemetry` library and standard Elixir 
 
 Ming wraps the execution of the dispatcher in a `span`, emitting the following events:
 
-* `[:ming, :dispatch, :start]` - Emitted when dispatch begins.
-* `[:ming, :dispatch, :stop]` - Emitted when dispatch completes successfully. Includes calculated `duration`.
-* `[:ming, :dispatch, :exception]` - Emitted if the pipeline raises an unhandled exception.
+- `[:ming, :dispatch, :start]` - Emitted when dispatch begins.
+- `[:ming, :dispatch, :stop]` - Emitted when dispatch completes successfully. Includes calculated `duration`.
+- `[:ming, :dispatch, :exception]` - Emitted if the pipeline raises an unhandled exception.
 
 All events include metadata such as `routing_key`, `handler`, `request_id`, and `correlation_id`.
 

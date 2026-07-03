@@ -8,7 +8,7 @@ defmodule Ming.MixProject do
     [
       app: :ming,
       version: @version,
-      elixir: "~> 1.20",
+      elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       consolidate_protocols: Mix.env() != :test,
@@ -45,7 +45,14 @@ defmodule Ming.MixProject do
       {:ex_doc, "~> 0.20", only: :dev, runtime: false},
 
       # Analyser
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+
+      # Message Mapper 
+      {:jason, "~> 1.4", optional: true},
+
+      # Message gateways
+      {:nimble_pool, "~> 1.1", optional: true},
+      {:amqp, "~> 4.1", optional: true}
     ]
   end
 
@@ -60,7 +67,23 @@ defmodule Ming.MixProject do
       main: "Ming",
       source_ref: "v#{@version}",
       source_url: @source_url,
-      skip_undefined_reference_warnings_on: ["CHANGELOG.md"]
+      skip_undefined_reference_warnings_on: ["CHANGELOG.md"],
+      extras: [
+        "README.md",
+        "guides/getting_started.md",
+        "guides/command_processor.md",
+        "guides/gateways.md",
+        "guides/middleware.md",
+        "CHANGELOG.md"
+      ],
+      groups_for_extras: [
+        Guides: [
+          "guides/getting_started.md",
+          "guides/command_processor.md",
+          "guides/gateways.md",
+          "guides/middleware.md"
+        ]
+      ]
     ]
   end
 
