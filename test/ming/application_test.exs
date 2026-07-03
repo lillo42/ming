@@ -1,4 +1,4 @@
-defmodule Ming.CommandProcessorTest do
+defmodule Ming.ApplicationTest do
   use ExUnit.Case
 
   defmodule CommandOne do
@@ -41,25 +41,25 @@ defmodule Ming.CommandProcessorTest do
     register(:atom_key_two, handler: MyHandler)
   end
 
-  defmodule MyProcessor do
-    use Ming.CommandProcessor
+  defmodule MyApp do
+    use Ming.Application, otp_app: :ming
 
     router(RouterOne)
     router(RouterTwo)
   end
 
-  defmodule MessagingProcessor do
-    use Ming.CommandProcessor
+  defmodule MessagingApp do
+    use Ming.Application, otp_app: :ming
   end
 
   setup do
-    original_env = Application.get_env(:ming, :gateways)
+    original_env = Application.get_env(:ming, Ming.ApplicationTest.MessagingApp)
 
     on_exit(fn ->
       if is_nil(original_env) do
-        Application.delete_env(:ming, :gateways)
+        Application.delete_env(:ming, Ming.ApplicationTest.MessagingApp)
       else
-        Application.put_env(:ming, :gateways, original_env)
+        Application.put_env(:ming, Ming.ApplicationTest.MessagingApp, original_env)
       end
     end)
   end
@@ -68,21 +68,23 @@ defmodule Ming.CommandProcessorTest do
     test "post/2 publishes a request through the messaging gateway" do
       start_supervised!(FakeProducerAgent)
 
-      Application.put_env(:ming, :gateways, [
-        [
-          adapter: FakeProducerGateway,
-          publications: [
-            [
-              routing_key: :order_created,
-              source: "cmd-proc-test",
-              mapper: FakeCommandProcessorMapper
+      Application.put_env(:ming, Ming.ApplicationTest.MessagingApp,
+        gateways: [
+          [
+            adapter: FakeProducerGateway,
+            publications: [
+              [
+                routing_key: :order_created,
+                source: "cmd-proc-test",
+                mapper: FakeApplicationMapper
+              ]
             ]
           ]
         ]
-      ])
+      )
 
       assert {:ok, :published} =
-               MessagingProcessor.post(%{"order_id" => 1}, routing_key: :order_created)
+               MessagingApp.post(%{"order_id" => 1}, routing_key: :order_created)
 
       [message] = FakeProducerAgent.messages()
       assert message.source == "cmd-proc-test"
@@ -92,55 +94,55 @@ defmodule Ming.CommandProcessorTest do
 
   describe "send/2" do
     test "routes command to the correct router" do
-      assert {:ok, 42} = MyProcessor.send(%CommandOne{val: 42})
-      assert :ok = MyProcessor.send(%CommandTwo{})
+      assert {:ok, 42} = MyApp.send(%CommandOne{val: 42})
+      assert :ok = MyApp.send(%CommandTwo{})
     end
 
     test "routes command with routing_key in opts" do
-      assert {:ok, 10} = MyProcessor.send(%{payload: 10}, routing_key: :atom_key_one)
-      assert {:ok, 20} = MyProcessor.send(%{payload: 20}, routing_key: :atom_key_two)
+      assert {:ok, 10} = MyApp.send(%{payload: 10}, routing_key: :atom_key_one)
+      assert {:ok, 20} = MyApp.send(%{payload: 20}, routing_key: :atom_key_two)
     end
 
     test "returns unregistered for unknown command" do
-      assert {:error, :unregistered_command} = MyProcessor.send(%{__struct__: UnknownCommand})
+      assert {:error, :unregistered_command} = MyApp.send(%{__struct__: UnknownCommand})
     end
 
     test "returns more_than_one_handler_found when routers conflict" do
       # Note: this is actually an Event handled as a Command but if we registered the same
       # command twice it would fail similarly. We can just test send with EventOne which has two routers.
-      assert {:error, :more_than_one_handler_found} = MyProcessor.send(%EventOne{})
+      assert {:error, :more_than_one_handler_found} = MyApp.send(%EventOne{})
     end
   end
 
   describe "publish/2" do
     test "publishes event to a single router" do
-      assert :ok = MyProcessor.publish(%EventTwo{})
+      assert :ok = MyApp.publish(%EventTwo{})
     end
 
     test "publishes event correctly when using an atom routing key" do
-      assert {:ok, 30} = MyProcessor.publish(%{payload: 30}, :atom_key_one)
-      assert {:ok, 40} = MyProcessor.publish(%{payload: 40}, :atom_key_two)
+      assert {:ok, 30} = MyApp.publish(%{payload: 30}, :atom_key_one)
+      assert {:ok, 40} = MyApp.publish(%{payload: 40}, :atom_key_two)
     end
 
     test "publishes event with routing_key in opts" do
-      assert {:ok, 30} = MyProcessor.publish(%{payload: 30}, routing_key: :atom_key_one)
-      assert {:ok, 40} = MyProcessor.publish(%{payload: 40}, routing_key: :atom_key_two)
+      assert {:ok, 30} = MyApp.publish(%{payload: 30}, routing_key: :atom_key_one)
+      assert {:ok, 40} = MyApp.publish(%{payload: 40}, routing_key: :atom_key_two)
     end
 
     test "publishes event sequentially to multiple routers by default" do
       # Both RouterOne and RouterTwo handle EventOne.
-      assert [{:ok, 100}, {:ok, 100}] = MyProcessor.publish(%EventOne{val: 100})
+      assert [{:ok, 100}, {:ok, 100}] = MyApp.publish(%EventOne{val: 100})
     end
 
     test "publishes event in parallel" do
-      results = MyProcessor.publish(%EventOne{val: 99}, dispatch_strategy: :parallel)
+      results = MyApp.publish(%EventOne{val: 99}, dispatch_strategy: :parallel)
       assert length(results) == 2
       assert {:ok, 99} in results
     end
   end
 end
 
-defmodule FakeCommandProcessorMapper do
+defmodule FakeApplicationMapper do
   alias Ming.Context
   alias Ming.Message
 

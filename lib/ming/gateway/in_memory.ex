@@ -11,7 +11,6 @@ defmodule Ming.Gateway.InMemory do
       [
         adapter: Ming.Gateway.InMemory,
         name: :my_in_memory_gateway,
-        command_processor: MyApp.CommandProcessor,
         publications: [
           [routing_key: :order_created]
         ],
@@ -20,9 +19,9 @@ defmodule Ming.Gateway.InMemory do
         ]
       ]
 
-  The `command_processor` option is only required when subscriptions are
-  configured. Publications may be published directly via
-  `Ming.Gateway.InMemory.Producer`.
+  The `:command_processor` option is injected automatically by
+  `Ming.Application`. It is only required when subscriptions are configured.
+  Publications may be published directly via `Ming.Gateway.InMemory.Producer`.
   """
 
   use Supervisor

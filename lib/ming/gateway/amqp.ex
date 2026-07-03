@@ -14,7 +14,6 @@ if Code.ensure_loaded?(AMQP) do
         [
           adapter: Ming.Gateway.AMQP,
           name: :my_amqp,
-          command_processor: MyApp.CommandProcessor,
           connection: [
             uri: "amqp://guest:guest@localhost",
             retry: [max_retries: 5, base_delay: 1_000]
@@ -90,44 +89,26 @@ if Code.ensure_loaded?(AMQP) do
 
       children =
         [{Connection, [name: connection_name, connection: connection_config]}]
-        |> publication(connection_name, Keyword.get(args, :publications, []))
-        |> subscriptions(
+        |> add_publications(connection_name, Keyword.get(args, :publications, []))
+        |> add_subscriptions(
           connection_name,
-          Keyword.fetch!(args, :command_processor),
+          Keyword.get(args, :command_processor),
           Keyword.get(args, :subscriptions, [])
         )
 
       Supervisor.init(Enum.reverse(children), strategy: :one_for_one)
     end
 
-    defp publication(acc, _gateway_name, []), do: acc
+    defp add_subscriptions(acc, _gateway_name, nil, []), do: acc
 
-    defp publication(acc, gateway_name, [publication | next]) do
-      pool_name = Keyword.fetch!(publication, :routing_key)
-
-      worker_opts =
-        publication
-        |> Keyword.put(:gateway_name, gateway_name)
-        |> Keyword.put_new(:retry, [])
-
-      pool_opts = [
-        name: pool_name,
-        pool_size: Keyword.get(publication, :number_of_performers, 1),
-        lazy: Keyword.get(publication, :lazy, false),
-        idle_timeout: Keyword.get(publication, :idle_timeout, :infinity),
-        max_idle_pings: Keyword.get(publication, :idle_pings, :infinity),
-        worker: {Publisher, worker_opts}
-      ]
-
-      [
-        %{id: pool_name, start: {NimblePool, :start_link, [pool_opts]}}
-        | publication(acc, gateway_name, next)
-      ]
+    defp add_subscriptions(_acc, _gateway_name, nil, [_subscription | _]) do
+      raise ArgumentError,
+            "AMQP gateway requires :command_processor when subscriptions are configured"
     end
 
-    defp subscriptions(acc, _gateway_name, _command_process, []), do: acc
+    defp add_subscriptions(acc, _gateway_name, _command_process, []), do: acc
 
-    defp subscriptions(acc, gateway_name, command_process, [subscription | next]) do
+    defp add_subscriptions(acc, gateway_name, command_process, [subscription | next]) do
       consumer_name = Keyword.fetch!(subscription, :name)
       process_pool_name = :"#{consumer_name}_process"
 
@@ -153,7 +134,32 @@ if Code.ensure_loaded?(AMQP) do
       [
         %{id: consumer_name, start: {Consumer, :start_link, [consumer_opts]}},
         %{id: {process_pool_name, MessageProcess}, start: {NimblePool, :start_link, [pool_opts]}}
-        | subscriptions(acc, gateway_name, command_process, next)
+        | add_subscriptions(acc, gateway_name, command_process, next)
+      ]
+    end
+
+    defp add_publications(acc, _gateway_name, []), do: acc
+
+    defp add_publications(acc, gateway_name, [publication | next]) do
+      pool_name = Keyword.fetch!(publication, :routing_key)
+
+      worker_opts =
+        publication
+        |> Keyword.put(:gateway_name, gateway_name)
+        |> Keyword.put_new(:retry, [])
+
+      pool_opts = [
+        name: pool_name,
+        pool_size: Keyword.get(publication, :number_of_performers, 1),
+        lazy: Keyword.get(publication, :lazy, false),
+        idle_timeout: Keyword.get(publication, :idle_timeout, :infinity),
+        max_idle_pings: Keyword.get(publication, :idle_pings, :infinity),
+        worker: {Publisher, worker_opts}
+      ]
+
+      [
+        %{id: pool_name, start: {NimblePool, :start_link, [pool_opts]}}
+        | add_publications(acc, gateway_name, next)
       ]
     end
 

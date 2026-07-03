@@ -32,7 +32,7 @@ defmodule Ming.Message.Middleware.ResolvePublication do
           }
         } = context
       ) do
-    gateways = Application.get_env(:ming, :gateways, [])
+    gateways = fetch_gateways(context)
 
     publications =
       gateways
@@ -76,6 +76,15 @@ defmodule Ming.Message.Middleware.ResolvePublication do
     context
     |> Context.halt()
     |> Context.respond({:error, :invalid_context})
+  end
+
+  defp fetch_gateways(%Context{metadata: %{ming_application: app}}) do
+    Application.get_env(:ming, app, [])
+    |> Keyword.get(:gateways, [])
+  end
+
+  defp fetch_gateways(_context) do
+    Application.get_env(:ming, :gateways, [])
   end
 
   @doc """

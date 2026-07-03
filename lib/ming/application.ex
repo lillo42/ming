@@ -1,22 +1,61 @@
-defmodule Ming.CommandProcessor do
+defmodule Ming.Application do
   @moduledoc """
-  Macro-based command processor that aggregates multiple routers.
+  Entry point and supervisor for a Ming application.
 
-  It builds routing tables at compile time and dispatches `send/2` and
-  `publish/2` calls to the correct router module.
+  A `Ming.Application` aggregates routers (command dispatch), reads gateway
+  configuration from the OTP application environment, and starts the gateway
+  supervision tree.
+
+  ## Example
+
+      defmodule MyApp.Application do
+        use Ming.Application, otp_app: :my_app
+
+        router(MyApp.Router)
+      end
+
+  Then add it to your supervision tree:
+
+      children = [
+        MyApp.Application
+      ]
+
+  And configure the gateways:
+
+      config :my_app, MyApp.Application,
+        gateways: [
+          [
+            adapter: Ming.Gateway.AMQP,
+            name: :my_amqp,
+            connection: [uri: "amqp://guest:guest@localhost"],
+            exchange: [name: "events", type: :topic],
+            publications: [
+              [routing_key: :order_created, number_of_performers: 2]
+            ],
+            subscriptions: [
+              [name: :orders, topic_or_queue: "orders.queue", routing_key: :order_created]
+            ]
+          ]
+        ]
   """
+
+  use Supervisor
 
   @doc """
-  Injects router aggregation macros.
+  Injects router aggregation macros and application options.
   """
   defmacro __using__(opts) do
-    default_message_mapper = Keyword.get(opts, :default_message_mapper, Ming.Message.Mapper.Json)
+    otp_app = Keyword.get(opts, :otp_app, :ming)
+
+    default_message_mapper =
+      Keyword.get(opts, :default_message_mapper, Ming.Message.Mapper.Json)
 
     quote do
       import unquote(__MODULE__)
 
       @before_compile unquote(__MODULE__)
 
+      @otp_app unquote(otp_app)
       @default_message_mapper unquote(default_message_mapper)
 
       Module.register_attribute(__MODULE__, :routers, accumulate: true)
@@ -26,7 +65,7 @@ defmodule Ming.CommandProcessor do
   end
 
   @doc """
-  Registers a router and all its routing keys into the processor.
+  Registers a router and all its routing keys into the application.
   """
   defmacro router(router_ast) do
     router = Macro.expand(router_ast, __CALLER__)
@@ -36,6 +75,36 @@ defmodule Ming.CommandProcessor do
         @routers {unquote(routing_key), unquote(router)}
       end
     end
+  end
+
+  @doc """
+  Starts the application supervisor linked to the current process.
+
+  The application name is registered globally under `__MODULE__` by default.
+  A custom name can be provided with the `:name` option.
+  """
+  @spec start_link(keyword()) :: Supervisor.on_start()
+  def start_link(opts \\ []) do
+    name = Keyword.get(opts, :name, __MODULE__)
+    Supervisor.start_link(__MODULE__, opts, name: name)
+  end
+
+  @impl true
+  def init(opts) do
+    module = Keyword.get(opts, :__module__, __MODULE__)
+    otp_app = Keyword.get(opts, :otp_app, :ming)
+
+    gateways =
+      otp_app
+      |> Application.get_env(module, [])
+      |> Keyword.get(:gateways, [])
+      |> Enum.map(&Keyword.put(&1, :command_processor, module))
+
+    children = [
+      {Ming.Gateway.Supervisor, gateways}
+    ]
+
+    Supervisor.init(children, strategy: :one_for_one)
   end
 
   @doc false
@@ -144,6 +213,7 @@ defmodule Ming.CommandProcessor do
           Keyword.get(opts, :metadata, %{})
           |> Map.put(:message_routing_key, Keyword.fetch!(opts, :routing_key))
           |> Map.put(:default_message_mapper, @default_message_mapper)
+          |> Map.put(:ming_application, __MODULE__)
 
         opts =
           opts
@@ -156,7 +226,7 @@ defmodule Ming.CommandProcessor do
       defp resolve_routing_key(opts, request) when is_struct(request),
         do: Keyword.get(opts, :routing_key, request.__struct__)
 
-      defp resolve_routing_key(opts, request), do: Keyword.fetch!(opts, :routing_key)
+      defp resolve_routing_key(opts, _request), do: Keyword.fetch!(opts, :routing_key)
 
       defp extract_stream_resp({:ok, res}), do: res
       defp extract_stream_resp({:exit, reason}), do: {:error, reason}
