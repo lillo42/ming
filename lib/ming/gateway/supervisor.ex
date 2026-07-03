@@ -2,9 +2,12 @@ defmodule Ming.Gateway.Supervisor do
   @moduledoc """
   Internal supervisor that starts all configured messaging gateways.
 
-  Started automatically by `Ming.Application`. Before starting each gateway,
+  Started automatically by `Ming.CommandProcessor`. Before starting each gateway,
   its adapter's `provision_infrastructure/1` callback is invoked to create
   exchanges, queues, and bindings.
+
+  `Ming.Gateway.Supervisor` is public for advanced use cases but is normally
+  started internally by a command processor.
 
   Each gateway config must include a `:command_processor` module that will
   receive consumed messages via `send/2`.

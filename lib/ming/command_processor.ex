@@ -216,13 +216,21 @@ defmodule Ming.CommandProcessor do
       unquote(publish_clauses)
       defp do_publish(_routing_key, _request, _opts), do: {:error, :unregistered_command}
 
+      @doc """
+      Publishes a request through the configured messaging gateway.
+
+      Accepts either a routing key atom or a keyword list of options. When a
+      keyword list is given, `:routing_key` is resolved from the request struct
+      unless already provided.
+      """
+      @spec post(any(), keyword(Ming.send_opts()) | Ming.routing_key()) :: Ming.resp()
       def post(request, opts \\ [])
 
       def post(request, routing_key) when is_atom(routing_key) do
         do_post(request, routing_key: routing_key)
       end
 
-      def post(request, opts) do
+      def post(request, opts) when is_list(opts) do
         opts = Keyword.put_new(opts, :routing_key, resolve_routing_key(opts, request))
         do_post(request, opts)
       end

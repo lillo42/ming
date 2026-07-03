@@ -14,7 +14,7 @@ Provides support for:
 - Configurable execution timeouts
 - In-memory messaging gateway for local development and testing
 
-Requires Erlang/OTP v27 and Elixir v1.20 or later.
+Requires Erlang/OTP v27 and Elixir v1.18 or later.
 
 ## Installation
 
@@ -151,7 +151,7 @@ config :my_app, MyApp.CommandProcessor,
   ]
 ```
 
-You can publish messages through the in-memory gateway using `Ming.CommandProcessor.post/2`:
+You can publish messages through the in-memory gateway using `post/2` on your command processor module:
 
 ```elixir
 MyApp.CommandProcessor.post(%OrderCreated{id: 123})

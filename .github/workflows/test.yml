@@ -18,6 +18,10 @@ jobs:
 
       matrix:
         include:
+          - elixir: 1.18.x
+            otp: 27
+          - elixir: 1.19.x
+            otp: 28
           - elixir: 1.20.x
             otp: 29
 
@@ -58,6 +62,10 @@ jobs:
 
       matrix:
         include:
+          - elixir: 1.18.x
+            otp: 27
+          - elixir: 1.19.x
+            otp: 28
           - elixir: 1.20.x
             otp: 29
 
@@ -90,7 +98,7 @@ jobs:
           otp-version: ${{ matrix.otp }}
 
       - name: install dependencies
-        run: mix do deps.get, deps.compile
+        run: mix deps.get
 
       - name: Wait for RabbitMQ
         run: |

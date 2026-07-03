@@ -20,7 +20,7 @@ defmodule Ming.Gateway.InMemory do
       ]
 
   The `:command_processor` option is injected automatically by
-  `Ming.Application`. It is only required when subscriptions are configured.
+  `Ming.CommandProcessor`. It is only required when subscriptions are configured.
   Publications may be published directly via `Ming.Gateway.InMemory.Producer`.
   """
 
