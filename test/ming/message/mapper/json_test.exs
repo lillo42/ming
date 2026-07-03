@@ -29,7 +29,7 @@ defmodule Ming.Message.Mapper.JsonTest do
       assert message.id == "msg-1"
       assert message.correlation_id == "corr-1"
       assert message.timestamp == ~U[2025-01-01T00:00:00Z]
-      assert JSON.decode!(message.payload) == %{"id" => 1}
+      assert JSON.decode!(IO.iodata_to_binary(message.payload)) == %{"id" => 1}
     end
 
     test "json mode builds a structured CloudEvents payload" do
@@ -46,7 +46,7 @@ defmodule Ming.Message.Mapper.JsonTest do
       assert message.content_type == "application/cloudevents+json"
       assert message.headers == %{"x-custom" => "value"}
 
-      decoded = JSON.decode!(message.payload)
+      decoded = JSON.decode!(IO.iodata_to_binary(message.payload))
       assert decoded["id"] == "msg-1"
       assert decoded["source"] == "my-app"
       assert decoded["type"] == "order.created"

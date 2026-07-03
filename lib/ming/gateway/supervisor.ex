@@ -30,8 +30,18 @@ defmodule Ming.Gateway.Supervisor do
 
   @doc """
   Starts the gateway supervisor linked to the current process.
+
+  When called without arguments, the supervisor reads gateway configurations
+  from `Application.get_env(:ming, :gateways, [])`.
   """
+  @spec start_link() :: Supervisor.on_start()
   @spec start_link([keyword()]) :: Supervisor.on_start()
+  def start_link(opts \\ nil)
+
+  def start_link(nil) do
+    start_link(Application.get_env(:ming, :gateways, []))
+  end
+
   def start_link(opts) do
     Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
   end

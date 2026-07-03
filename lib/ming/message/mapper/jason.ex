@@ -48,7 +48,7 @@ if Code.ensure_loaded?(Jason) do
         id: id,
         correlation_id: correlation_id,
         content_type: "application/json",
-        payload: Jason.encode!(request),
+        payload: Jason.encode_to_iodata!(request),
         routing_key: routing_key,
         timestamp: timestamp
       }
@@ -92,7 +92,7 @@ if Code.ensure_loaded?(Jason) do
         id: context.id,
         headers: headers,
         content_type: "application/cloudevents+json",
-        payload: Jason.encode!(payload),
+        payload: Jason.encode_to_iodata!(payload),
         routing_key: routing_key,
         timestamp: context.timestamp
       }

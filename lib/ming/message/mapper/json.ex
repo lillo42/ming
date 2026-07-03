@@ -48,7 +48,7 @@ defmodule Ming.Message.Mapper.Json do
       id: id,
       correlation_id: correlation_id,
       content_type: "application/json",
-      payload: JSON.encode!(request),
+      payload: JSON.encode_to_iodata!(request),
       routing_key: routing_key,
       timestamp: timestamp
     }
@@ -92,7 +92,7 @@ defmodule Ming.Message.Mapper.Json do
       id: context.id,
       headers: headers,
       content_type: "application/cloudevents+json",
-      payload: JSON.encode!(payload),
+      payload: JSON.encode_to_iodata!(payload),
       routing_key: routing_key,
       timestamp: context.timestamp
     }
