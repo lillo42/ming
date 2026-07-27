@@ -3,7 +3,9 @@ defmodule Ming.Message.Middleware.DecodeMessageToRequest do
   Middleware that converts a `%Ming.Message{}` back to a domain request
   using a configured mapper module.
 
-  Expects `:mapper` in context assigns.
+  Expects `:mapper` in context assigns; falls back to
+  `metadata[:default_message_mapper]` and finally to
+  `Ming.Message.Mapper.Json` when no mapper is assigned.
   """
 
   alias Ming.Context
@@ -14,8 +16,7 @@ defmodule Ming.Message.Middleware.DecodeMessageToRequest do
   Decodes the current `%Ming.Message{}` request into a domain request via
   the configured mapper and stores the original message in assigns.
 
-  Halts with an error if the mapper returns an invalid response or is
-  missing.
+  Halts with an error if the mapper returns an invalid response.
   """
   @impl Ming.Middleware
   def before_handle(context)
@@ -41,9 +42,12 @@ defmodule Ming.Message.Middleware.DecodeMessageToRequest do
   end
 
   def before_handle(%Context{} = context) do
-    context
-    |> Context.halt()
-    |> Context.respond({:error, :message_mapper_not_provided})
+    mapper =
+      context.assigns[:mapper] ||
+        get_in(context.metadata || %{}, [:default_message_mapper]) ||
+        Ming.Message.Mapper.Json
+
+    before_handle(%Context{context | assigns: Map.put(context.assigns, :mapper, mapper)})
   end
 
   @doc """

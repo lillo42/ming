@@ -60,7 +60,7 @@ defmodule Ming.Message.Middleware.ResolvePublication do
             Keyword.get(gateway, :mapper, default_message_mapper)
 
         context
-        |> Context.assign(:gateway, Keyword.fetch!(gateway, :adapter))
+        |> Context.assign(:gateway, gateway)
         |> Context.assign(:publication, publication)
         |> Context.assign(:ming_message_publication, publication)
         |> Context.assign(:mapper, mapper)
@@ -79,7 +79,15 @@ defmodule Ming.Message.Middleware.ResolvePublication do
   end
 
   defp fetch_gateways(%Context{metadata: %{ming_application: app}}) do
-    Application.get_env(:ming, app, [])
+    otp_app =
+      if function_exported?(app, :__ming_otp_app__, 0) do
+        app.__ming_otp_app__()
+      else
+        :ming
+      end
+
+    otp_app
+    |> Application.get_env(app, [])
     |> Keyword.get(:gateways, [])
   end
 

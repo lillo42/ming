@@ -41,8 +41,6 @@ defmodule Ming.CommandProcessor do
         ]
   """
 
-  use Supervisor
-
   @doc """
   Injects router aggregation macros and command processor options.
   """
@@ -53,6 +51,8 @@ defmodule Ming.CommandProcessor do
       Keyword.get(opts, :default_message_mapper, Ming.Message.Mapper.Json)
 
     quote do
+      use Supervisor
+
       import unquote(__MODULE__)
 
       @before_compile unquote(__MODULE__)
@@ -66,6 +66,36 @@ defmodule Ming.CommandProcessor do
 
       @doc false
       def __ming_otp_app__, do: @otp_app
+
+      @doc """
+      Starts the command processor supervisor linked to the current process.
+
+      The processor name is registered under `__MODULE__` by default.
+      A custom name can be provided with the `:name` option.
+      """
+      @spec start_link(keyword()) :: Supervisor.on_start()
+      def start_link(opts \\ []) do
+        name = Keyword.get(opts, :name, __MODULE__)
+        Supervisor.start_link(__MODULE__, opts, name: name)
+      end
+
+      @impl true
+      def init(opts) do
+        otp_app =
+          if Keyword.has_key?(opts, :otp_app) do
+            Keyword.fetch!(opts, :otp_app)
+          else
+            @otp_app
+          end
+
+        gateways =
+          otp_app
+          |> Application.get_env(__MODULE__, [])
+          |> Keyword.get(:gateways, [])
+          |> Enum.map(&Keyword.put(&1, :command_processor, __MODULE__))
+
+        Supervisor.init([{Ming.Gateway.Supervisor, gateways}], strategy: :one_for_one)
+      end
     end
   end
 
@@ -79,50 +109,6 @@ defmodule Ming.CommandProcessor do
       quote generated: true do
         @routers {unquote(routing_key), unquote(router)}
       end
-    end
-  end
-
-  @doc """
-  Starts the command processor supervisor linked to the current process.
-
-  The processor name is registered globally under `__MODULE__` by default.
-  A custom name can be provided with the `:name` option.
-  """
-  @spec start_link(keyword()) :: Supervisor.on_start()
-  def start_link(opts \\ []) do
-    name = Keyword.get(opts, :name, __MODULE__)
-    Supervisor.start_link(__MODULE__, opts, name: name)
-  end
-
-  @impl true
-  def init(opts) do
-    module = __MODULE__
-
-    otp_app =
-      if Keyword.has_key?(opts, :otp_app) do
-        Keyword.fetch!(opts, :otp_app)
-      else
-        apply_module(module, :__ming_otp_app__, [], :ming)
-      end
-
-    gateways =
-      otp_app
-      |> Application.get_env(module, [])
-      |> Keyword.get(:gateways, [])
-      |> Enum.map(&Keyword.put(&1, :command_processor, module))
-
-    children = [
-      {Ming.Gateway.Supervisor, gateways}
-    ]
-
-    Supervisor.init(children, strategy: :one_for_one)
-  end
-
-  defp apply_module(module, function, args, default) do
-    if function_exported?(module, function, length(args)) do
-      apply(module, function, args)
-    else
-      default
     end
   end
 

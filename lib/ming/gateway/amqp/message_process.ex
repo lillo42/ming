@@ -32,7 +32,7 @@ if Code.ensure_loaded?(AMQP) do
           result =
             command_process.send(message,
               routing_key: :ming_consume_message,
-              metadata: %{routing_key: routing_key},
+              metadata: %{routing_key: routing_key, command_process: command_process},
               timeout: timeout
             )
 

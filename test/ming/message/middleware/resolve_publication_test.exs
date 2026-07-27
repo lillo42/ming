@@ -44,7 +44,7 @@ defmodule Ming.Message.Middleware.ResolvePublicationTest do
       result = ResolvePublication.before_handle(ctx)
 
       refute Context.halted?(result)
-      assert result.assigns.gateway == FakeGateway
+      assert result.assigns.gateway[:adapter] == FakeGateway
       assert result.assigns.publication[:routing_key] == :order_created
       assert result.assigns.mapper == CustomMapper
     end
@@ -87,6 +87,37 @@ defmodule Ming.Message.Middleware.ResolvePublicationTest do
       assert Context.response(result) == {:error, {:multi_publication_found, :order_created, 2}}
     end
 
+    test "reads gateways from the processor module's otp_app" do
+      Application.put_env(:fake_otp_app, FakeOtpAppProcessor,
+        gateways: [
+          [
+            adapter: FakeGateway,
+            publications: [[routing_key: :order_created]]
+          ]
+        ]
+      )
+
+      on_exit(fn -> Application.delete_env(:fake_otp_app, FakeOtpAppProcessor) end)
+
+      ctx = %Context{
+        assigns: %{},
+        metadata: %{
+          message_routing_key: :order_created,
+          default_message_mapper: Ming.Message.Mapper.Json,
+          ming_application: FakeOtpAppProcessor
+        },
+        request: nil,
+        routing_key: :ming_produce_message,
+        timeout: :infinity
+      }
+
+      result = ResolvePublication.before_handle(ctx)
+
+      refute Context.halted?(result)
+      assert result.assigns.gateway[:adapter] == FakeGateway
+      assert result.assigns.publication[:routing_key] == :order_created
+    end
+
     test "halts when required metadata is missing" do
       ctx = %Context{
         assigns: %{},
@@ -105,6 +136,10 @@ defmodule Ming.Message.Middleware.ResolvePublicationTest do
 end
 
 defmodule FakeGateway do
+end
+
+defmodule FakeOtpAppProcessor do
+  def __ming_otp_app__, do: :fake_otp_app
 end
 
 defmodule CustomMapper do

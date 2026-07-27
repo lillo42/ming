@@ -3,8 +3,8 @@ defmodule Ming.Message.ProducerMessageHandler do
   Handler that publishes a %Ming.Message{} via a configured producer.
 
   Expects the context assigns to include:
-  - `:ming_message_producer` — a module implementing `Ming.Message.Producer`
-  - `:ming_message_publication` — publication options for the producer
+  - `:gateway` — the full gateway configuration (must contain `:adapter`)
+  - `:publication` — publication options for the producer
   """
 
   alias Ming.Context
@@ -39,7 +39,7 @@ defmodule Ming.Message.ProducerMessageHandler do
       ) do
     extra_opts = Map.get(metadata, :producer_opts, [])
 
-    producer = gateway.producer()
+    producer = gateway |> Keyword.fetch!(:adapter) |> apply(:producer, [])
 
     producer.publish(request,
       gateway: gateway,

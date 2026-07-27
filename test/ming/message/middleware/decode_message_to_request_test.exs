@@ -90,10 +90,34 @@ defmodule Ming.Message.Middleware.DecodeMessageToRequestTest do
       assert result.assigns.original_message == message
     end
 
-    test "halts when mapper is not provided" do
+    test "falls back to metadata default_message_mapper when mapper is not assigned" do
       message = %Message{
         id: "msg-1",
         payload: "data",
+        routing_key: :order_created,
+        timestamp: DateTime.utc_now()
+      }
+
+      FakeMapperAgent.set_to_request(fn msg -> {:ok, %{"payload" => msg.payload}} end)
+
+      ctx = %Context{
+        assigns: %{},
+        metadata: %{default_message_mapper: FakeMapper},
+        request: message,
+        routing_key: :ming_consume_message,
+        timeout: :infinity
+      }
+
+      result = DecodeMessageToRequest.before_handle(ctx)
+
+      assert result.request == %{"payload" => "data"}
+      assert result.assigns.original_message == message
+    end
+
+    test "falls back to the default JSON mapper when no mapper is configured" do
+      message = %Message{
+        id: "msg-1",
+        payload: ~s({"a": 1}),
         routing_key: :order_created,
         timestamp: DateTime.utc_now()
       }
@@ -108,8 +132,8 @@ defmodule Ming.Message.Middleware.DecodeMessageToRequestTest do
 
       result = DecodeMessageToRequest.before_handle(ctx)
 
-      assert Context.halted?(result)
-      assert Context.response(result) == {:error, :message_mapper_not_provided}
+      assert result.request == %{"a" => 1}
+      assert result.assigns.original_message == message
     end
   end
 end

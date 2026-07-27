@@ -16,7 +16,7 @@ defmodule Ming.Message.ProducerMessageHandlerTest do
       ctx = %Context{
         routing_key: :ming_produce_message,
         assigns: %{
-          gateway: FakeProducerGateway,
+          gateway: [adapter: FakeProducerGateway],
           publication: [routing_key: :order_created]
         },
         metadata: %{producer_opts: [persistent: true]},

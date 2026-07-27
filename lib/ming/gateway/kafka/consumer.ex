@@ -45,7 +45,7 @@ if Code.ensure_loaded?(:brod) do
       result =
         state.command_processor.send(message,
           routing_key: :ming_consume_message,
-          metadata: %{routing_key: state.routing_key},
+          metadata: %{routing_key: state.routing_key, command_process: state.command_processor},
           timeout: state.timeout
         )
 

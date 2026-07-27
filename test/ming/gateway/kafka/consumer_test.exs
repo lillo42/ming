@@ -138,7 +138,12 @@ defmodule Ming.Gateway.Kafka.ConsumerTest do
 
       assert_receive {:consumed, %Message{payload: "hello", id: "msg-ack"}, opts}
       assert opts[:routing_key] == :ming_consume_message
-      assert opts[:metadata] == %{routing_key: :order_created}
+
+      assert opts[:metadata] == %{
+               routing_key: :order_created,
+               command_process: TestKafkaProcessor
+             }
+
       assert state.routing_key == :order_created
     end
 
