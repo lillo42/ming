@@ -175,6 +175,40 @@ defmodule Ming.Gateway.AMQP.ProducerTest do
       end
     end
 
+    test "publishes iodata payloads as binary", %{
+      amqp_chan: chan,
+      exchange: exchange,
+      context: %{pool_name: _pool_name, routing_key: routing_key}
+    } do
+      queue =
+        declare_and_bind(%{
+          amqp_chan: chan,
+          exchange: exchange,
+          context: %{routing_key: routing_key}
+        })
+
+      # The default JSON mapper produces iodata, not a binary
+      message = %Message{
+        id: "iodata-msg",
+        payload: ["hello ", ["io", "data"]],
+        routing_key: routing_key,
+        timestamp: DateTime.utc_now()
+      }
+
+      gateway_config = [
+        adapter: Ming.Gateway.AMQP,
+        name: :unused,
+        exchange: [name: to_string(exchange), type: :topic]
+      ]
+
+      publication = [routing_key: routing_key]
+
+      assert :ok = Producer.publish(message, gateway: gateway_config, publication: publication)
+      Process.sleep(100)
+
+      assert {:ok, "hello iodata", _meta} = Basic.get(chan, to_string(queue), no_ack: true)
+    end
+
     test "injects CloudEvents headers in binary mode", %{
       amqp_chan: chan,
       exchange: exchange,

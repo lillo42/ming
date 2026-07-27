@@ -350,6 +350,38 @@ defmodule Ming.Gateway.AMQPTest do
       assert {:ok, %{queue: ^queue_str}} = Queue.declare(chan, queue_str, passive: true)
     end
 
+    test "provisioned binding routes messages with the subscription routing key", %{
+      amqp_chan: chan
+    } do
+      exchange = unique_name("prov_ex_bind_routes")
+      queue = unique_name("prov_queue_bind_routes")
+      routing_key = unique_name("prov_rk_bind_routes")
+
+      delete_on_exit(chan, exchange, queue)
+
+      opts = [
+        connection: [uri: rabbit_uri()],
+        exchange: [name: to_string(exchange), type: :topic, provision: {:create, durable: true}],
+        subscriptions: [
+          [
+            name: unique_name(:sub),
+            topic_or_queue: to_string(queue),
+            routing_key: routing_key,
+            provision: {:create, durable: true}
+          ]
+        ]
+      ]
+
+      assert :ok = AMQP.provision_infrastructure(opts)
+
+      :ok = Basic.publish(chan, to_string(exchange), to_string(routing_key), "routed")
+      :ok = Basic.publish(chan, to_string(exchange), "other.key", "not routed")
+      Process.sleep(100)
+
+      assert {:ok, "routed", _meta} = Basic.get(chan, to_string(queue), no_ack: true)
+      assert {:empty, _} = Basic.get(chan, to_string(queue), no_ack: true)
+    end
+
     test "returns error and cleans up on connection failure" do
       opts = [
         connection: [uri: "amqp://guest:guest@localhost:9999"],

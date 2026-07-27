@@ -289,7 +289,7 @@ if Code.ensure_loaded?(AMQP) do
       try do
         with {:ok, _queue} <- ensure_queue_exists(provision, channel, dead_letter_queue),
              {:ok, _queue} <- ensure_queue_exists(provision, channel, queue),
-             :ok <- ensure_queue_is_bound(provision, channel, queue, exchange) do
+             :ok <- ensure_queue_is_bound(provision, channel, queue, exchange, subscription) do
           ensure_queues_exists({:ok, conn, channel}, next, exchange)
         else
           {:error, reason} ->
@@ -320,16 +320,21 @@ if Code.ensure_loaded?(AMQP) do
       Queue.declare(channel, queue, passive: false)
     end
 
-    defp ensure_queue_is_bound(:assume, _channel, _queue, _exchange), do: :ok
-    defp ensure_queue_is_bound(:validate, _channel, _queue, _exchange), do: :ok
-    defp ensure_queue_is_bound({:validate, _opts}, _channel, _queue, _exchange), do: :ok
+    defp ensure_queue_is_bound(:assume, _channel, _queue, _exchange, _subscription), do: :ok
+    defp ensure_queue_is_bound(:validate, _channel, _queue, _exchange, _subscription), do: :ok
 
-    defp ensure_queue_is_bound({_action, opts}, channel, queue, exchange) do
-      Queue.bind(channel, queue, exchange, opts)
-    end
+    defp ensure_queue_is_bound({:validate, _opts}, _channel, _queue, _exchange, _subscription),
+      do: :ok
 
-    defp ensure_queue_is_bound(_action, channel, queue, exchange) do
-      Queue.bind(channel, queue, exchange)
+    defp ensure_queue_is_bound({_action, _opts}, channel, queue, exchange, subscription),
+      do: bind_queue(channel, queue, exchange, subscription)
+
+    defp ensure_queue_is_bound(_action, channel, queue, exchange, subscription),
+      do: bind_queue(channel, queue, exchange, subscription)
+
+    defp bind_queue(channel, queue, exchange, subscription) do
+      routing_key = subscription |> Keyword.fetch!(:routing_key) |> to_string()
+      Queue.bind(channel, queue, exchange, routing_key: routing_key)
     end
 
     defp close_channel({:error, reason}), do: {:error, reason}

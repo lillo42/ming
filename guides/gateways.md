@@ -83,12 +83,20 @@ config :my_app, MyApp.CommandProcessor,
           name: :orders,
           topic_or_queue: "orders.queue",
           routing_key: :order_created,
-          provision: :create
+          provision: {:create, durable: true}
         ]
       ]
     ]
   ]
 ```
+
+Notes:
+
+- RabbitMQ 4.x rejects transient (non-durable) queues — use
+  `{:create, durable: true}` when provisioning queues.
+- When provisioning, the queue is bound to the gateway exchange using the
+  subscription's `:routing_key` as the binding key.
+- A runnable example is available in `samples/rabbitmq_sample`.
 
 ## Kafka gateway
 
@@ -166,5 +174,17 @@ Consumed messages are dispatched back through the command processor using the `:
 - `:validate` — verify the exchange or queue exists without creating it.
 - `:create` — create the exchange or queue; fail if it already exists.
 - `:create_or_override` — create or redeclare the exchange or queue.
+- `{:create, opts}` / `{:create_or_override, opts}` — same as above, passing
+  `opts` to the declaration. For AMQP these go to `AMQP.Queue.declare/3` /
+  `AMQP.Exchange.declare/4` (e.g. `durable: true`); for Kafka they accept
+  `:num_partitions`, `:replication_factor`, and `:configs`.
 
 The Kafka gateway supports `:assume`, `:validate`, and `:create` (or `{:create, opts}`) only.
+
+## Samples
+
+Complete runnable applications demonstrating the gateways end to end live in
+the `samples/` directory:
+
+- `samples/kafka_sample` — publish and consume through Apache Kafka
+- `samples/rabbitmq_sample` — publish and consume through RabbitMQ (AMQP)

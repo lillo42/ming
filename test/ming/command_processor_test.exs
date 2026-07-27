@@ -96,6 +96,31 @@ defmodule Ming.CommandProcessorTest do
     end
   end
 
+  describe "start_link/1" do
+    test "boots as a supervisor and starts gateways from config" do
+      Application.put_env(:ming, MessagingCommandProcessor,
+        gateways: [
+          [
+            adapter: Ming.Gateway.InMemory,
+            name: :boot_test_gateway,
+            publications: [[routing_key: :boot_test_key]],
+            subscriptions: [[name: :boot_test_sub, routing_key: :boot_test_key]]
+          ]
+        ]
+      )
+
+      pid = start_supervised!(MessagingCommandProcessor)
+      assert Process.alive?(pid)
+
+      assert [{Ming.Gateway.Supervisor, gateway_sup, :supervisor, _}] =
+               Supervisor.which_children(pid)
+
+      assert Process.alive?(gateway_sup)
+
+      assert :ok = MessagingCommandProcessor.post(%{"order_id" => 1}, :boot_test_key)
+    end
+  end
+
   describe "send/2" do
     test "routes command to the correct router" do
       assert {:ok, 42} = MyCommandProcessor.send(%CommandOne{val: 42})

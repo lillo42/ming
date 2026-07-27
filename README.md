@@ -187,12 +187,17 @@ config :my_app, MyApp.CommandProcessor,
           name: :orders,
           topic_or_queue: "orders.queue",
           routing_key: :order_created,
-          provision: :create
+          # RabbitMQ 4.x rejects transient (non-durable) queues
+          provision: {:create, durable: true}
         ]
       ]
     ]
   ]
 ```
+
+For queues and exchanges, `:provision` also accepts `{:create, opts}` / `{:create_or_override, opts}`, where `opts` are passed to `AMQP.Queue.declare/3` / `AMQP.Exchange.declare/4` (e.g. `durable: true`). When provisioning, the queue is bound to the gateway exchange using the subscription's `:routing_key` as the binding key.
+
+A runnable version of this setup is available in [`samples/rabbitmq_sample`](samples/rabbitmq_sample).
 
 Add `:amqp` and `:nimble_pool` to your dependencies to use the AMQP gateway:
 
@@ -254,6 +259,15 @@ end
 ```
 
 `:topic_or_queue` is the Kafka topic and is required on both publications and subscriptions. `:group_id` defaults to the subscription name, and `:consumer_config`/`:group_config` are passed through to `:brod_group_subscriber_v2`. See the [gateways guide](guides/gateways.md) for the full option list.
+
+A runnable version of this setup is available in [`samples/kafka_sample`](samples/kafka_sample).
+
+## Samples
+
+Complete runnable applications demonstrating the messaging gateways end to end:
+
+- [`samples/kafka_sample`](samples/kafka_sample) — publish and consume through Apache Kafka
+- [`samples/rabbitmq_sample`](samples/rabbitmq_sample) — publish and consume through RabbitMQ (AMQP)
 
 ## Middleware Pipeline
 
