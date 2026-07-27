@@ -47,12 +47,16 @@ defmodule Ming.MixProject do
       # Analyser
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
 
-      # Message Mapper 
+      # Message Mapper
       {:jason, "~> 1.4", optional: true},
 
       # Message gateways
+      ## AMQP
       {:nimble_pool, "~> 1.1", optional: true},
-      {:amqp, "~> 4.1", optional: true}
+      {:amqp, "~> 4.1", optional: true},
+
+      ## AMQP
+      {:brod, "~> 4.5", optional: true}
     ]
   end
 
