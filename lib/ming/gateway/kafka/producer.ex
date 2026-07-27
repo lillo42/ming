@@ -8,6 +8,7 @@ if Code.ensure_loaded?(:brod) do
     modes.
     """
 
+    alias Ming.Gateway.Kafka
     alias Ming.Message
     alias Ming.Message.Baggage
     alias Ming.Message.TraceState
@@ -31,18 +32,19 @@ if Code.ensure_loaded?(:brod) do
       publication = Keyword.fetch!(opts, :publication)
       extra_opts = Keyword.get(opts, :extra_opts, [])
 
-      gateway_name = Keyword.fetch!(gateway, :name)
-      topic = Keyword.fetch!(publication, :topic_or_queue)
+      client = gateway |> Keyword.fetch!(:name) |> Kafka.client_name()
+      topic = publication |> Keyword.fetch!(:topic_or_queue) |> to_string()
 
       kafka_key = kafka_key(message)
-      default_partition = if is_nil(kafka_key), do: :random, else: :hash
+      default_partition = if kafka_key == <<>>, do: :random, else: :hash
       partition = Keyword.get(extra_opts, :partition, default_partition)
 
       headers = headers(publication, message)
 
-      :brod.produce_sync(gateway_name, topic, partition, kafka_key, %{
+      :brod.produce_sync(client, topic, partition, kafka_key, %{
         value: message.payload,
-        headers: headers
+        headers: headers,
+        ts: DateTime.to_unix(message.timestamp, :millisecond)
       })
     end
 

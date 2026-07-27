@@ -55,7 +55,7 @@ defmodule Ming.MixProject do
       {:nimble_pool, "~> 1.1", optional: true},
       {:amqp, "~> 4.1", optional: true},
 
-      ## AMQP
+      ## Kafka
       {:brod, "~> 4.5", optional: true}
     ]
   end

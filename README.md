@@ -212,6 +212,49 @@ Publishing and consuming work the same way as the in-memory gateway:
 MyApp.CommandProcessor.post(%OrderCreated{id: 123})
 ```
 
+### Kafka Gateway
+
+`Ming.Gateway.Kafka` connects to Apache Kafka via `:brod`. It manages a single `:brod` client per gateway and one consumer group subscriber per subscription, and provisions topics before startup.
+
+```elixir
+# config/runtime.exs or config/config.exs
+config :my_app, MyApp.CommandProcessor,
+  gateways: [
+    [
+      adapter: Ming.Gateway.Kafka,
+      name: :my_kafka_gateway,
+      connection: [
+        endpoints: [{"localhost", 9092}]
+      ],
+      publications: [
+        [routing_key: :order_created, topic_or_queue: "orders"]
+      ],
+      subscriptions: [
+        [
+          name: :orders,
+          topic_or_queue: "orders",
+          routing_key: :order_created,
+          group_id: "my-app",
+          provision: {:create, num_partitions: 3, replication_factor: 1}
+        ]
+      ]
+    ]
+  ]
+```
+
+Add `:brod` to your dependencies to use the Kafka gateway:
+
+```elixir
+defp deps do
+  [
+    {:ming, "~> 0.2.0"},
+    {:brod, "~> 4.5"}
+  ]
+end
+```
+
+`:topic_or_queue` is the Kafka topic and is required on both publications and subscriptions. `:group_id` defaults to the subscription name, and `:consumer_config`/`:group_config` are passed through to `:brod_group_subscriber_v2`. See the [gateways guide](guides/gateways.md) for the full option list.
+
 ## Middleware Pipeline
 
 Ming's middleware engine acts very much like Elixir's `Plug`. Middlewares implement the `Ming.Middleware` behaviour and receive the `Ming.Context`.

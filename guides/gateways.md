@@ -90,6 +90,61 @@ config :my_app, MyApp.CommandProcessor,
   ]
 ```
 
+## Kafka gateway
+
+`Ming.Gateway.Kafka` connects to Apache Kafka via `:brod`. It manages a single `:brod` client per gateway, one consumer group subscriber per subscription, and can provision topics before startup.
+
+Add `:brod` to your dependencies:
+
+```elixir
+defp deps do
+  [
+    {:ming, "~> 0.2.0"},
+    {:brod, "~> 4.5"}
+  ]
+end
+```
+
+Example configuration:
+
+```elixir
+config :my_app, MyApp.CommandProcessor,
+  gateways: [
+    [
+      adapter: Ming.Gateway.Kafka,
+      name: :kafka_gateway,
+      connection: [
+        endpoints: [{"localhost", 9092}]
+      ],
+      publications: [
+        [routing_key: :order_created, topic_or_queue: "orders"]
+      ],
+      subscriptions: [
+        [
+          name: :orders,
+          topic_or_queue: "orders",
+          routing_key: :order_created,
+          group_id: "my-app",
+          provision: {:create, num_partitions: 3, replication_factor: 1}
+        ]
+      ]
+    ]
+  ]
+```
+
+Notes:
+
+- `:topic_or_queue` is the Kafka topic and is required on both publications and subscriptions.
+- The `:brod` client is registered as `:"#{name}_client"` (see `Ming.Gateway.Kafka.client_name/1`).
+- Any extra `:connection` keys are passed through to `:brod.start_link_client/3`.
+- Subscription-only options:
+  - `:group_id` — Kafka consumer group id, defaults to the subscription name.
+  - `:processing_timeout` — timeout passed to the command processor, defaults to `:infinity`.
+  - `:consumer_config` and `:group_config` — passed through to `:brod_group_subscriber_v2`.
+- Topic provisioning supports `:assume` (default), `:validate`, `:create`, and `{:create, opts}` where `opts` accepts `:num_partitions`, `:replication_factor`, and `:configs`.
+
+Messages are published with CloudEvents attributes as `ce_`-prefixed Kafka headers and consumed back into `%Ming.Message{}` structs. Consumed messages are processed one at a time (`message_type: :message`) and acked per offset.
+
 ## Publishing and consuming
 
 Use `post/2` on your command processor module to publish a message through the configured gateway:
@@ -111,3 +166,5 @@ Consumed messages are dispatched back through the command processor using the `:
 - `:validate` — verify the exchange or queue exists without creating it.
 - `:create` — create the exchange or queue; fail if it already exists.
 - `:create_or_override` — create or redeclare the exchange or queue.
+
+The Kafka gateway supports `:assume`, `:validate`, and `:create` (or `{:create, opts}`) only.

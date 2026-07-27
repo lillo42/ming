@@ -1,1 +1,1 @@
-ExUnit.start(exclude: [:rabbitmq])
+ExUnit.start(exclude: [:rabbitmq, :kafka])
