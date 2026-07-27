@@ -22,6 +22,7 @@
           packages = [
             pkgs.beam28Packages.elixir_1_20
             pkgs.beam28Packages.expert
+            pkgs.cmake
           ];
         };
       }
