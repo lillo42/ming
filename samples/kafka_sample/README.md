@@ -48,9 +48,10 @@ A few moments later you should see the handler log line:
 ```
 
 The consumed payload arrives JSON-decoded (a plain map). The handler's return
-value drives offset commits: `:ok`/`{:ok, _}` ack (commit), `:requeue` does
-not commit (the message is redelivered), `:reject`/`{:error, _}` ack to skip
-the message (Kafka has no reject).
+value drives offset commits: `:ok`/`{:ok, _}` ack (commit), while `:reject`,
+`:requeue`, and `{:error, _}` all ack as well — Kafka has no reject/requeue,
+so `:requeue` additionally logs an error telling you the message was acked
+and will not be redelivered.
 
 ## How it fits together
 

@@ -20,8 +20,8 @@ defmodule KafkaSample.OrderHandler do
     )
 
     # Return values map to broker acks:
-    #   :ok / {:ok, _} -> ack, :reject -> ack (skip), :requeue -> offset not
-    #   committed (redelivery), {:error, _} -> ack (skip)
+    #   :ok / {:ok, _} -> ack, :reject -> ack (skip), :requeue -> ack plus an
+    #   error log (Kafka has no requeue), {:error, _} -> ack (skip)
     :ok
   end
 end

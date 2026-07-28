@@ -41,11 +41,16 @@ if Code.ensure_loaded?(:brod) do
 
       headers = headers(publication, message)
 
-      :brod.produce_sync(client, topic, partition, kafka_key, %{
-        value: message.payload,
-        headers: headers,
-        ts: DateTime.to_unix(message.timestamp, :millisecond)
-      })
+      try do
+        :brod.produce_sync(client, topic, partition, kafka_key, %{
+          value: message.payload,
+          headers: headers,
+          ts: DateTime.to_unix(message.timestamp, :millisecond)
+        })
+      catch
+        # e.g. :message_too_large for oversized payloads
+        :exit, reason -> {:error, reason}
+      end
     end
 
     defp kafka_key(%Message{partition_key: nil}), do: <<>>

@@ -39,6 +39,11 @@ if Code.ensure_loaded?(:brod) do
       defaults to `:infinity`.
     - `:consumer_config` — extra `:brod` consumer config, defaults to `[]`.
     - `:group_config` — extra `:brod` group config, defaults to `[]`.
+    - `:requeue_routing_key` — routing key of a publication the message is
+      republished to when the handler requeues it (Kafka has no native requeue).
+    - `:dead_letter_queue_routing_key` — routing key of a publication the
+      message is forwarded to when the handler rejects it (Kafka has no
+      native reject).
     """
 
     use Supervisor
@@ -106,7 +111,9 @@ if Code.ensure_loaded?(:brod) do
       init_data = [
         routing_key: Keyword.fetch!(subscription, :routing_key),
         command_processor: command_processor,
-        timeout: Keyword.get(subscription, :processing_timeout, :infinity)
+        timeout: Keyword.get(subscription, :processing_timeout, :infinity),
+        requeue_routing_key: Keyword.get(subscription, :requeue_routing_key),
+        dead_letter_queue_routing_key: Keyword.get(subscription, :dead_letter_queue_routing_key)
       ]
 
       config = %{

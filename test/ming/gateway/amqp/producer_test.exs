@@ -292,6 +292,43 @@ defmodule Ming.Gateway.AMQP.ProducerTest do
       refute Map.has_key?(headers, "cloudEvents:id")
     end
 
+    test "preserves non-ASCII custom header values", %{
+      amqp_chan: chan,
+      exchange: exchange,
+      context: %{pool_name: _pool_name, routing_key: routing_key}
+    } do
+      queue =
+        declare_and_bind(%{
+          amqp_chan: chan,
+          exchange: exchange,
+          context: %{routing_key: routing_key}
+        })
+
+      message = %Message{
+        id: "utf8-msg",
+        payload: "utf8",
+        routing_key: routing_key,
+        timestamp: DateTime.utc_now(),
+        headers: %{"x-custom" => "café résumé"}
+      }
+
+      gateway_config = [
+        adapter: Ming.Gateway.AMQP,
+        name: :unused,
+        exchange: [name: to_string(exchange), type: :topic]
+      ]
+
+      publication = [routing_key: routing_key, cloudevent_mode: :json]
+
+      assert :ok = Producer.publish(message, gateway: gateway_config, publication: publication)
+      Process.sleep(100)
+
+      assert {:ok, "utf8", meta} = Basic.get(chan, to_string(queue), no_ack: true)
+      headers = amqp_headers_to_map(meta.headers || [])
+
+      assert headers["x-custom"] == "café résumé"
+    end
+
     test "merges default headers", %{
       amqp_chan: chan,
       exchange: exchange,

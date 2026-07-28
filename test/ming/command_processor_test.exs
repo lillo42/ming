@@ -17,11 +17,16 @@ defmodule Ming.CommandProcessorTest do
     defstruct [:val]
   end
 
+  defmodule FlakyEvent do
+    defstruct [:val]
+  end
+
   defmodule MyHandler do
     def handle(%CommandOne{val: val}, _ctx), do: {:ok, val}
     def handle(%CommandTwo{}, _ctx), do: :ok
     def handle(%EventOne{val: val}, _ctx), do: {:ok, val}
     def handle(%EventTwo{}, _ctx), do: :ok
+    def handle(%FlakyEvent{val: val}, _ctx), do: {:ok, val}
     def handle(%{payload: val}, _ctx), do: {:ok, val}
   end
 
@@ -41,11 +46,22 @@ defmodule Ming.CommandProcessorTest do
     register(:atom_key_two, handler: MyHandler)
   end
 
+  defmodule FlakyHandler do
+    def handle(%FlakyEvent{}, _ctx), do: raise("boom")
+  end
+
+  defmodule RouterThree do
+    use Ming.Router
+    register(FlakyEvent, handler: FlakyHandler)
+    register(FlakyEvent, handler: MyHandler)
+  end
+
   defmodule MyCommandProcessor do
     use Ming.CommandProcessor, otp_app: :ming
 
     router(RouterOne)
     router(RouterTwo)
+    router(RouterThree)
   end
 
   defmodule MessagingCommandProcessor do
@@ -168,6 +184,19 @@ defmodule Ming.CommandProcessorTest do
       results = MyCommandProcessor.publish(%EventOne{val: 99}, dispatch_strategy: :parallel)
       assert length(results) == 2
       assert {:ok, 99} in results
+    end
+
+    test "collects errors from failing handlers without stopping the others" do
+      assert [{:ok, 1}, {:error, %RuntimeError{message: "boom"}}] =
+               MyCommandProcessor.publish(%FlakyEvent{val: 1})
+    end
+
+    test "collects errors from failing handlers in parallel" do
+      results = MyCommandProcessor.publish(%FlakyEvent{val: 1}, dispatch_strategy: :parallel)
+
+      assert length(results) == 2
+      assert {:ok, 1} in results
+      assert Enum.any?(results, &match?({:error, %RuntimeError{message: "boom"}}, &1))
     end
   end
 end

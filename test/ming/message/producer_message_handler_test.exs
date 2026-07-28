@@ -65,6 +65,14 @@ defmodule Ming.Message.ProducerMessageHandlerTest do
       assert ProducerMessageHandler.handle(%{"id" => 1}, ctx) == :requeue
     end
 
+    test "unwraps ack/reject/requeue wrapped in {:ok, _} by the dispatch pipeline" do
+      for {response, expected} <- [ack: :ack, reject: :reject, requeue: :requeue] do
+        FakeCommandProcessorAgent.set_behavior(fn _request, _opts -> {:ok, response} end)
+        ctx = consume_context()
+        assert ProducerMessageHandler.handle(%{"id" => 1}, ctx) == expected
+      end
+    end
+
     test "returns :reject when command processor returns an error" do
       FakeCommandProcessorAgent.set_behavior(fn _request, _opts -> {:error, :failed} end)
       ctx = consume_context()

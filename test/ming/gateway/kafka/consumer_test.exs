@@ -5,6 +5,8 @@ defmodule Ming.Gateway.Kafka.ConsumerTest do
 
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias Ming.Gateway.Kafka.Consumer
   alias Ming.Message
 
@@ -21,7 +23,9 @@ defmodule Ming.Gateway.Kafka.ConsumerTest do
       partition: 0,
       routing_key: :order_created,
       command_processor: TestKafkaProcessor,
-      timeout: :infinity
+      timeout: :infinity,
+      requeue_routing_key: nil,
+      dead_letter_queue_routing_key: nil
     }
     |> Map.merge(Map.new(opts))
   end
@@ -154,11 +158,53 @@ defmodule Ming.Gateway.Kafka.ConsumerTest do
       assert_receive {:consumed, %Message{}, _opts}
     end
 
-    test "does not ack when the processor requeues the message" do
+    test "acks and logs an error when the processor requeues the message" do
       Application.put_env(:ming, :kafka_test_response, {:ok, :requeue})
 
-      assert {:ok, _state} = Consumer.handle_message(kafka_message(), state())
+      log =
+        capture_log([level: :error], fn ->
+          assert {:ok, :ack, _state} = Consumer.handle_message(kafka_message(), state())
+        end)
+
+      assert log =~ "Kafka does not support requeue"
+      assert log =~ "acked"
       assert_receive {:consumed, %Message{}, _opts}
+    end
+
+    test "republishes requeued messages to the requeue routing key and acks" do
+      Application.put_env(:ming, :kafka_test_response, {:ok, :requeue})
+
+      assert {:ok, :ack, _state} =
+               Consumer.handle_message(kafka_message(), state(requeue_routing_key: :orders_retry))
+
+      assert_receive {:consumed, %Message{}, _opts}
+      assert_receive {:posted, %Message{payload: "payload"}, :orders_retry}
+    end
+
+    test "forwards rejected messages to the dead letter queue and acks" do
+      Application.put_env(:ming, :kafka_test_response, {:ok, :reject})
+
+      assert {:ok, :ack, _state} =
+               Consumer.handle_message(
+                 kafka_message(),
+                 state(dead_letter_queue_routing_key: :orders_dlq)
+               )
+
+      assert_receive {:consumed, %Message{}, _opts}
+
+      assert_receive {:posted, %Message{} = dlq_message, :orders_dlq}
+      assert dlq_message.headers["ORIGINAL_TOPIC"] == "orders"
+      assert %DateTime{} = dlq_message.headers["ORIGINAL_TIMESTAMP"]
+      assert Map.has_key?(dlq_message.headers, "ORIGINAL_TYPE")
+    end
+
+    test "acks rejected messages without a dead letter queue" do
+      Application.put_env(:ming, :kafka_test_response, {:ok, :reject})
+
+      assert {:ok, :ack, _state} = Consumer.handle_message(kafka_message(), state())
+
+      assert_receive {:consumed, %Message{}, _opts}
+      refute_receive {:posted, _, _}
     end
 
     test "acks when the processor fails" do

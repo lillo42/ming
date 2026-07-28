@@ -350,6 +350,37 @@ defmodule Ming.Gateway.AMQPTest do
       assert {:ok, %{queue: ^queue_str}} = Queue.declare(chan, queue_str, passive: true)
     end
 
+    test "{:create, opts} passes queue arguments to the broker", %{amqp_chan: chan} do
+      exchange = unique_name("prov_ex_args")
+      queue = unique_name("prov_queue_args")
+      routing_key = unique_name("prov_rk_args")
+
+      delete_on_exit(chan, exchange, queue)
+
+      opts = [
+        connection: [uri: rabbit_uri()],
+        exchange: [name: to_string(exchange), type: :topic, provision: {:create, durable: true}],
+        subscriptions: [
+          [
+            name: unique_name(:sub),
+            topic_or_queue: to_string(queue),
+            routing_key: routing_key,
+            provision: {:create, durable: true, arguments: [{"x-max-length", :long, 1}]}
+          ]
+        ]
+      ]
+
+      assert :ok = AMQP.provision_infrastructure(opts)
+
+      :ok = Basic.publish(chan, to_string(exchange), to_string(routing_key), "first")
+      :ok = Basic.publish(chan, to_string(exchange), to_string(routing_key), "second")
+      Process.sleep(100)
+
+      # x-max-length: 1 drops the oldest message (default drop-head overflow)
+      assert {:ok, "second", _meta} = Basic.get(chan, to_string(queue), no_ack: true)
+      assert {:empty, _} = Basic.get(chan, to_string(queue), no_ack: true)
+    end
+
     test "provisioned binding routes messages with the subscription routing key", %{
       amqp_chan: chan
     } do
@@ -393,6 +424,58 @@ defmodule Ming.Gateway.AMQPTest do
   end
 
   describe "end-to-end" do
+    defp boot_e2e_processor(publications, subscriptions, exchange) do
+      Application.put_env(:ming, :amqp_e2e_pid, self())
+
+      Application.put_env(:ming, AMQPE2EProcessor,
+        gateways: [
+          [
+            adapter: AMQP,
+            name: unique_name(:e2e_cp_gateway),
+            connection: [uri: rabbit_uri(), retry: [max_retries: 1, base_delay: 10]],
+            exchange: [name: to_string(exchange), type: :topic, provision: :assume],
+            publications: publications,
+            subscriptions: subscriptions
+          ]
+        ]
+      )
+
+      on_exit(fn ->
+        Application.delete_env(:ming, :amqp_e2e_pid)
+        Application.delete_env(:ming, :amqp_e2e_response)
+        Application.delete_env(:ming, AMQPE2EProcessor)
+      end)
+
+      start_supervised!(AMQPE2EProcessor)
+    end
+
+    defp eventually(fun, attempts \\ 50)
+    defp eventually(_fun, 0), do: false
+
+    defp eventually(fun, attempts) do
+      if fun.() do
+        true
+      else
+        Process.sleep(100)
+        eventually(fun, attempts - 1)
+      end
+    end
+
+    defp get_with_retry(chan, queue, attempts \\ 50)
+
+    defp get_with_retry(chan, queue, 0), do: Basic.get(chan, to_string(queue), no_ack: true)
+
+    defp get_with_retry(chan, queue, attempts) do
+      case Basic.get(chan, to_string(queue), no_ack: true) do
+        {:empty, _} ->
+          Process.sleep(100)
+          get_with_retry(chan, queue, attempts - 1)
+
+        {:ok, payload, meta} ->
+          {:ok, payload, meta}
+      end
+    end
+
     test "supervisor starts, publishes and consumes a message", %{amqp_chan: chan} do
       exchange = unique_name("e2e_exchange")
       queue = unique_name("e2e_queue")
@@ -446,5 +529,180 @@ defmodule Ming.Gateway.AMQPTest do
       Process.sleep(200)
       assert {:empty, _} = Basic.get(chan, to_string(queue))
     end
+
+    test "post/2 round-trips through a real command processor", %{amqp_chan: chan} do
+      exchange = unique_name("e2e_cp_exchange")
+      queue = unique_name("e2e_cp_queue")
+      routing_key = :e2e_shipped
+
+      Application.put_env(:ming, :amqp_e2e_pid, self())
+
+      Application.put_env(:ming, AMQPE2EProcessor,
+        gateways: [
+          [
+            adapter: AMQP,
+            name: unique_name(:e2e_cp_gateway),
+            connection: [uri: rabbit_uri(), retry: [max_retries: 1, base_delay: 10]],
+            exchange: [
+              name: to_string(exchange),
+              type: :topic,
+              provision: {:create, durable: true}
+            ],
+            publications: [[routing_key: routing_key]],
+            subscriptions: [
+              [
+                name: unique_name(:e2e_cp_sub),
+                topic_or_queue: to_string(queue),
+                routing_key: routing_key,
+                provision: {:create, durable: true}
+              ]
+            ]
+          ]
+        ]
+      )
+
+      on_exit(fn ->
+        Application.delete_env(:ming, :amqp_e2e_pid)
+        Application.delete_env(:ming, AMQPE2EProcessor)
+
+        try do
+          Queue.delete(chan, to_string(queue))
+          Exchange.delete(chan, to_string(exchange))
+        catch
+          _, _ -> :ok
+        end
+      end)
+
+      pid = start_supervised!(AMQPE2EProcessor)
+      assert Process.alive?(pid)
+
+      assert :ok = AMQPE2EProcessor.post(%{"id" => 1, "tracking_code" => "BR123"}, routing_key)
+
+      assert_receive {:handled, :e2e_shipped, request, metadata, _assigns}, 5_000
+      assert request == %{"id" => 1, "tracking_code" => "BR123"}
+      assert metadata[:routing_key] == routing_key
+
+      # Give consumer time to ack, then assert queue is empty
+      Process.sleep(200)
+      assert {:empty, _} = Basic.get(chan, to_string(queue))
+    end
+
+    test "concurrent posts all succeed", %{amqp_chan: chan} do
+      exchange = unique_name("e2e_conc_exchange")
+      queue = unique_name("e2e_conc_queue")
+
+      declare_exchange(chan, exchange)
+      declare_queue(chan, queue, exchange, :e2e_shipped)
+
+      boot_e2e_processor(
+        [[routing_key: :e2e_shipped]],
+        [
+          [
+            name: unique_name(:e2e_conc_sub),
+            topic_or_queue: to_string(queue),
+            routing_key: :e2e_shipped,
+            provision: :assume
+          ]
+        ],
+        exchange
+      )
+
+      results =
+        1..20
+        |> Task.async_stream(fn i -> AMQPE2EProcessor.post(%{"i" => i}, :e2e_shipped) end,
+          max_concurrency: 10
+        )
+        |> Enum.map(fn {:ok, result} -> result end)
+
+      assert Enum.all?(results, &(&1 == :ok))
+    end
+
+    test "rejects poison payloads without crashing the consumer", %{amqp_chan: chan} do
+      exchange = unique_name("e2e_poison_exchange")
+      queue = unique_name("e2e_poison_queue")
+
+      declare_exchange(chan, exchange)
+      declare_queue(chan, queue, exchange, :e2e_shipped)
+
+      boot_e2e_processor(
+        [[routing_key: :e2e_shipped]],
+        [
+          [
+            name: unique_name(:e2e_poison_sub),
+            topic_or_queue: to_string(queue),
+            routing_key: :e2e_shipped,
+            provision: :assume
+          ]
+        ],
+        exchange
+      )
+
+      :ok = Basic.publish(chan, to_string(exchange), "e2e_shipped", "not json{{")
+
+      assert eventually(fn -> match?({:empty, _}, Basic.get(chan, to_string(queue))) end)
+
+      refute_receive {:handled, _, _, _, _}, 500
+
+      assert :ok = AMQPE2EProcessor.post(%{"id" => 2}, :e2e_shipped)
+      assert_receive {:handled, :e2e_shipped, %{"id" => 2}, _metadata, _assigns}, 5_000
+    end
+
+    test "propagates trace context through produce and consume", %{amqp_chan: chan} do
+      exchange = unique_name("e2e_trace_exchange")
+      queue = unique_name("e2e_trace_queue")
+
+      declare_exchange(chan, exchange)
+      declare_queue(chan, queue, exchange, :e2e_shipped)
+
+      boot_e2e_processor([[routing_key: :e2e_shipped]], [], exchange)
+
+      trace_parent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+
+      assert :ok =
+               AMQPE2EProcessor.post(%{"id" => 3},
+                 routing_key: :e2e_shipped,
+                 metadata: %{trace_parent: trace_parent}
+               )
+
+      assert {:ok, payload, meta} = get_with_retry(chan, queue)
+      assert JSON.decode!(payload) == %{"id" => 3}
+
+      headers = Map.new(meta.headers || [], fn {key, _type, value} -> {key, value} end)
+      assert headers["cloudEvents:traceparent"] == trace_parent
+    end
   end
+end
+
+defmodule AMQPE2EHandler do
+  @moduledoc false
+  @behaviour Ming.Handler
+
+  # Sends {:handled, routing_key, request, metadata, assigns} to the pid in
+  # :amqp_e2e_pid. The response for :e2e_shipped is read from
+  # :amqp_e2e_response (default :ok); other routing keys always return :ok.
+  def handle(request, context) do
+    send(
+      Application.get_env(:ming, :amqp_e2e_pid),
+      {:handled, context.routing_key, request, context.metadata, context.assigns}
+    )
+
+    case context.routing_key do
+      :e2e_shipped -> Application.get_env(:ming, :amqp_e2e_response, :ok)
+      _other -> :ok
+    end
+  end
+end
+
+defmodule AMQPE2ERouter do
+  @moduledoc false
+  use Ming.Router
+
+  register(:e2e_shipped, handler: AMQPE2EHandler)
+end
+
+defmodule AMQPE2EProcessor do
+  @moduledoc false
+  use Ming.CommandProcessor, otp_app: :ming
+
+  router(AMQPE2ERouter)
 end

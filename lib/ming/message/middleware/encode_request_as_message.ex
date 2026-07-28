@@ -21,6 +21,8 @@ defmodule Ming.Message.Middleware.EncodeRequestAsMessage do
   @impl Ming.Middleware
   def before_handle(context)
 
+  def before_handle(%Context{request: %Message{}} = context), do: context
+
   def before_handle(%Context{assigns: %{mapper: mapper}, request: request} = context) do
     case mapper.to_message(request, context) do
       %Message{} = message ->

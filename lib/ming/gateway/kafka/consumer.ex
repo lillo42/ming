@@ -9,6 +9,14 @@ if Code.ensure_loaded?(:brod) do
 
     The subscriber is configured with `message_type: :message`, so
     `handle_message/2` receives one `kafka_message` record at a time.
+
+    Handler results map to offsets: `:ack` commits, `:reject` commits after
+    forwarding the message to the publication named by the subscription's
+    `:dead_letter_queue_routing_key` option when configured (Kafka has no
+    reject), and `:requeue` commits after republishing to the publication
+    named by the subscription's `:requeue_routing_key` option when configured
+    (Kafka has no requeue) — without one, an error is logged and the message
+    is simply acked.
     """
 
     require Record
@@ -24,6 +32,8 @@ if Code.ensure_loaded?(:brod) do
       Record.extract(:kafka_message, from_lib: "kafka_protocol/include/kpro_public.hrl")
     )
 
+    require Logger
+
     @impl :brod_group_subscriber_v2
     def init(init_info, cb_config) do
       %{topic: topic, partition: partition} = init_info
@@ -34,18 +44,21 @@ if Code.ensure_loaded?(:brod) do
          partition: partition,
          routing_key: Keyword.fetch!(cb_config, :routing_key),
          command_processor: Keyword.fetch!(cb_config, :command_processor),
-         timeout: Keyword.get(cb_config, :timeout, :infinity)
+         timeout: Keyword.get(cb_config, :timeout, :infinity),
+         requeue_routing_key: Keyword.get(cb_config, :requeue_routing_key),
+         dead_letter_queue_routing_key: Keyword.get(cb_config, :dead_letter_queue_routing_key)
        }}
     end
 
     @impl :brod_group_subscriber_v2
     def handle_message(kafka_message() = record, state) do
+      command_processor = state.command_processor
       message = to_message(record, state)
 
       result =
-        state.command_processor.send(message,
+        command_processor.send(message,
           routing_key: :ming_consume_message,
-          metadata: %{routing_key: state.routing_key, command_process: state.command_processor},
+          metadata: %{routing_key: state.routing_key, command_process: command_processor},
           timeout: state.timeout
         )
 
@@ -54,13 +67,34 @@ if Code.ensure_loaded?(:brod) do
           {:ok, :ack, state}
 
         {:ok, :reject} ->
-          # Kafka has no reject; ack to skip the message
+          # Kafka has no reject; forward to the dead letter queue when
+          # configured, then ack to skip the message
+          if dead_letter_queue = state.dead_letter_queue_routing_key do
+            headers =
+              message.headers
+              |> Map.put("ORIGINAL_TIMESTAMP", message.timestamp)
+              |> Map.put("ORIGINAL_TOPIC", state.topic)
+              |> Map.put("ORIGINAL_TYPE", message.type)
+
+            command_processor.post(%Message{message | headers: headers}, dead_letter_queue)
+          end
+
           {:ok, :ack, state}
 
         {:ok, :requeue} ->
-          # Do not ack: the offset is not committed and the message
-          # is redelivered after the subscriber restarts or rebalances
-          {:ok, state}
+          # Kafka has no requeue; republish to the configured requeue
+          # topic when present, otherwise log and ack
+          if requeue = state.requeue_routing_key do
+            command_processor.post(message, requeue)
+          else
+            Logger.error(
+              "Kafka does not support requeue; the message was acked and will not be redelivered",
+              kafka_topic: state.topic,
+              kafka_partition: state.partition
+            )
+          end
+
+          {:ok, :ack, state}
 
         {:error, _reason} ->
           {:ok, :ack, state}
