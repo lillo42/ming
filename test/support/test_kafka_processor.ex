@@ -15,4 +15,11 @@ defmodule TestKafkaProcessor do
 
     Application.get_env(:ming, :kafka_test_response, {:ok, :ack})
   end
+
+  def post(request, routing_key) do
+    pid = Application.fetch_env!(:ming, :kafka_test_target_pid)
+    Kernel.send(pid, {:posted, request, routing_key})
+
+    :ok
+  end
 end

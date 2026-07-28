@@ -149,9 +149,13 @@ Notes:
   - `:group_id` — Kafka consumer group id, defaults to the subscription name.
   - `:processing_timeout` — timeout passed to the command processor, defaults to `:infinity`.
   - `:consumer_config` and `:group_config` — passed through to `:brod_group_subscriber_v2`.
+  - `:requeue_routing_key` — routing key of a publication the message is republished to when the handler requeues it.
+  - `:dead_letter_queue_routing_key` — routing key of a publication the message is forwarded to when the handler rejects it.
 - Topic provisioning supports `:assume` (default), `:validate`, `:create`, and `{:create, opts}` where `opts` accepts `:num_partitions`, `:replication_factor`, and `:configs`.
 
 Messages are published with CloudEvents attributes as `ce_`-prefixed Kafka headers and consumed back into `%Ming.Message{}` structs. Consumed messages are processed one at a time (`message_type: :message`) and acked per offset.
+
+Handler results map to offsets as follows: `:ack` commits. `:reject` commits after forwarding the message to the publication named by the subscription's `:dead_letter_queue_routing_key` option, when configured (Kafka has no reject; the forwarded message carries `ORIGINAL_TIMESTAMP`, `ORIGINAL_TOPIC`, and `ORIGINAL_TYPE` headers). `:requeue` commits after republishing the message to the publication named by the subscription's `:requeue_routing_key` option, when configured (Kafka has no requeue) — without one, an error is logged (`"Kafka does not support requeue; the message was acked and will not be redelivered"`) and the message is acked.
 
 ## Publishing and consuming
 
@@ -162,6 +166,16 @@ MyApp.CommandProcessor.post(%MyApp.OrderCreated{id: 123})
 ```
 
 Consumed messages are dispatched back through the command processor using the `:ming_consume_message` pipeline.
+
+### Ack, reject, and requeue
+
+The value returned by your handler (via the consumed pipeline) is translated into a broker acknowledgement:
+
+- `:ok`, `{:ok, _}`, or `:ack` — acknowledge the message.
+- `:reject` — reject without requeue (AMQP) / forward to the subscription's `:dead_letter_queue_routing_key` publication when configured, then commit the offset (Kafka).
+- `:requeue` — reject with requeue (AMQP) / republish to the subscription's `:requeue_routing_key` publication when configured, then commit the offset; without one, commit and log an error since Kafka has no requeue (Kafka).
+- `{:error, _}` — reject without requeue (AMQP) / commit the offset to skip the message (Kafka).
+- a raised exception — reject with requeue (AMQP) / commit the offset with the same error log as `:requeue` (Kafka).
 
 ## Publication and subscription keys
 
