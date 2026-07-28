@@ -96,6 +96,15 @@ Notes:
   `{:create, durable: true}` when provisioning queues.
 - When provisioning, the queue is bound to the gateway exchange using the
   subscription's `:routing_key` as the binding key.
+- Broker-native dead lettering: when the gateway configures
+  `:dead_letter_exchange` and a subscription sets `:dead_letter` (a queue
+  name), provisioning declares the dead letter queue, binds it to the dead
+  letter exchange with the subscription's `:routing_key`, and declares the
+  subscription queue with the `x-dead-letter-exchange` /
+  `x-dead-letter-routing-key` arguments. From then on the broker itself
+  dead-letters any message that is rejected without requeue (`:reject`,
+  `{:reject, reason}`, `{:error, _}`) — including unacceptable messages
+  that fail to decode.
 - A runnable example is available in `samples/rabbitmq_sample`.
 
 ## Kafka gateway
@@ -151,6 +160,7 @@ Notes:
   - `:consumer_config` and `:group_config` — passed through to `:brod_group_subscriber_v2`.
   - `:requeue_routing_key` — routing key of a publication the message is republished to when the handler requeues it.
   - `:dead_letter_queue_routing_key` — routing key of a publication the message is forwarded to when the handler rejects it.
+  - `:invalid_message_routing_key` — routing key of a publication an unacceptable message (one that fails to decode) is forwarded to; falls back to `:dead_letter_queue_routing_key` when not configured.
 - Topic provisioning supports `:assume` (default), `:validate`, `:create`, and `{:create, opts}` where `opts` accepts `:num_partitions`, `:replication_factor`, and `:configs`.
 
 Messages are published with CloudEvents attributes as `ce_`-prefixed Kafka headers and consumed back into `%Ming.Message{}` structs. Consumed messages are processed one at a time (`message_type: :message`) and acked per offset.
@@ -172,7 +182,8 @@ Consumed messages are dispatched back through the command processor using the `:
 The value returned by your handler (via the consumed pipeline) is translated into a broker acknowledgement:
 
 - `:ok`, `{:ok, _}`, or `:ack` — acknowledge the message.
-- `:reject` — reject without requeue (AMQP) / forward to the subscription's `:dead_letter_queue_routing_key` publication when configured, then commit the offset (Kafka).
+- `:reject` — reject without requeue (AMQP; the broker dead-letters the message when the queue was provisioned with a dead letter exchange) / forward to the subscription's `:dead_letter_queue_routing_key` publication when configured, then commit the offset (Kafka).
+- `{:reject, reason}` — same transport behavior as `:reject`, carrying a reason. `{:reject, :unaccepted}` marks a poison message: it is also the automatic result when a message fails to decode, and on Kafka it is forwarded to the subscription's `:invalid_message_routing_key` publication (falling back to `:dead_letter_queue_routing_key`).
 - `:requeue` — reject with requeue (AMQP) / republish to the subscription's `:requeue_routing_key` publication when configured, then commit the offset; without one, commit and log an error since Kafka has no requeue (Kafka).
 - `{:error, _}` — reject without requeue (AMQP) / commit the offset to skip the message (Kafka).
 - a raised exception — reject with requeue (AMQP) / commit the offset with the same error log as `:requeue` (Kafka).

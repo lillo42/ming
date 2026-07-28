@@ -180,14 +180,25 @@ if Code.ensure_loaded?(AMQP) do
       exchange = Keyword.get(args, :exchange)
       exchange_name = if is_binary(exchange), do: exchange, else: Keyword.fetch!(exchange, :name)
 
+      dead_letter_exchange_name =
+        dead_letter_exchange_name(Keyword.get(args, :dead_letter_exchange))
+
       create_connection(connection)
       |> create_channel()
       |> ensure_exchange_exists(exchange)
       |> ensure_exchange_exists(Keyword.get(args, :dead_letter_exchange))
-      |> ensure_queues_exists(Keyword.get(args, :subscriptions, []), exchange_name)
+      |> ensure_queues_exists(
+        Keyword.get(args, :subscriptions, []),
+        exchange_name,
+        dead_letter_exchange_name
+      )
       |> close_channel()
       |> close_conn()
     end
+
+    defp dead_letter_exchange_name(nil), do: nil
+    defp dead_letter_exchange_name(exchange) when is_binary(exchange), do: exchange
+    defp dead_letter_exchange_name(exchange), do: Keyword.fetch!(exchange, :name)
 
     defp create_connection(uri_or_opts) do
       uri_or_opts =
@@ -274,23 +285,48 @@ if Code.ensure_loaded?(AMQP) do
       Exchange.declare(channel, name, type)
     end
 
-    defp ensure_queues_exists(val, [], _exchange), do: val
+    defp ensure_queues_exists(val, [], _exchange, _dead_letter_exchange), do: val
 
-    defp ensure_queues_exists({:error, reason}, _subscriptions, _exchange), do: {:error, reason}
+    defp ensure_queues_exists({:error, reason}, _subscriptions, _exchange, _dead_letter_exchange),
+      do: {:error, reason}
 
-    defp ensure_queues_exists({:error, reason, conn, channel}, _subscriptions, _exchange),
-      do: {:error, reason, conn, channel}
+    defp ensure_queues_exists(
+           {:error, reason, conn, channel},
+           _subscriptions,
+           _exchange,
+           _dead_letter_exchange
+         ),
+         do: {:error, reason, conn, channel}
 
-    defp ensure_queues_exists({:ok, conn, channel}, [subscription | next], exchange) do
+    defp ensure_queues_exists({:ok, conn, channel}, [subscription | next], exchange, dlx) do
       queue = Keyword.fetch!(subscription, :topic_or_queue)
+      routing_key = Keyword.fetch!(subscription, :routing_key)
       dead_letter_queue = Keyword.get(subscription, :dead_letter)
       provision = Keyword.get(subscription, :provision, :assume)
 
+      # Broker-native dead lettering: the subscription queue is declared with
+      # x-dead-letter-* arguments pointing at the gateway's dead letter
+      # exchange, and the dead letter queue is bound to it
+      queue_provision =
+        if dlx && dead_letter_queue do
+          with_dead_letter_arguments(provision, dlx, routing_key)
+        else
+          provision
+        end
+
       try do
         with {:ok, _queue} <- ensure_queue_exists(provision, channel, dead_letter_queue),
-             {:ok, _queue} <- ensure_queue_exists(provision, channel, queue),
+             :ok <-
+               ensure_dead_letter_is_bound(
+                 dlx,
+                 provision,
+                 channel,
+                 dead_letter_queue,
+                 routing_key
+               ),
+             {:ok, _queue} <- ensure_queue_exists(queue_provision, channel, queue),
              :ok <- ensure_queue_is_bound(provision, channel, queue, exchange, subscription) do
-          ensure_queues_exists({:ok, conn, channel}, next, exchange)
+          ensure_queues_exists({:ok, conn, channel}, next, exchange, dlx)
         else
           {:error, reason} ->
             {:error, reason, conn, channel}
@@ -300,6 +336,38 @@ if Code.ensure_loaded?(AMQP) do
           {:error, reason, conn, channel}
       end
     end
+
+    defp with_dead_letter_arguments({action, opts}, dlx, routing_key)
+         when action in [:create, :create_or_override] do
+      arguments = [
+        {"x-dead-letter-exchange", :longstr, dlx},
+        {"x-dead-letter-routing-key", :longstr, to_string(routing_key)}
+      ]
+
+      {action, Keyword.update(opts, :arguments, arguments, &(&1 ++ arguments))}
+    end
+
+    defp with_dead_letter_arguments(action, dlx, routing_key)
+         when action in [:create, :create_or_override],
+         do: with_dead_letter_arguments({action, []}, dlx, routing_key)
+
+    defp with_dead_letter_arguments(provision, _dlx, _routing_key), do: provision
+
+    defp ensure_dead_letter_is_bound(dlx, provision, channel, dead_letter_queue, routing_key) do
+      if dlx && dead_letter_queue && provision_creates?(provision) do
+        Queue.bind(channel, dead_letter_queue, dlx, routing_key: to_string(routing_key))
+      else
+        :ok
+      end
+    end
+
+    defp provision_creates?(:create), do: true
+    defp provision_creates?(:create_or_override), do: true
+
+    defp provision_creates?({action, _opts}) when action in [:create, :create_or_override],
+      do: true
+
+    defp provision_creates?(_provision), do: false
 
     defp ensure_queue_exists(_action, _channel, nil), do: {:ok, nil}
     defp ensure_queue_exists(:assume, _channel, _queue), do: {:ok, nil}

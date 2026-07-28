@@ -69,6 +69,9 @@ defmodule Ming.Message.ProducerMessageHandler do
         {:ok, response} when response in [:ack, :reject, :requeue] ->
           response
 
+        {:ok, {:reject, reason}} ->
+          {:reject, reason}
+
         {:ok, _response} ->
           :ack
 
@@ -77,6 +80,9 @@ defmodule Ming.Message.ProducerMessageHandler do
 
         :reject ->
           :reject
+
+        {:reject, reason} ->
+          {:reject, reason}
 
         :requeue ->
           :requeue

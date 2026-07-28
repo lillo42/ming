@@ -73,6 +73,21 @@ defmodule Ming.Message.ProducerMessageHandlerTest do
       end
     end
 
+    test "passes through {:reject, reason} from the command processor" do
+      FakeCommandProcessorAgent.set_behavior(fn _request, _opts -> {:reject, :unaccepted} end)
+      ctx = consume_context()
+      assert ProducerMessageHandler.handle(%{"id" => 1}, ctx) == {:reject, :unaccepted}
+    end
+
+    test "unwraps {:reject, reason} wrapped in {:ok, _} by the dispatch pipeline" do
+      FakeCommandProcessorAgent.set_behavior(fn _request, _opts ->
+        {:ok, {:reject, :unaccepted}}
+      end)
+
+      ctx = consume_context()
+      assert ProducerMessageHandler.handle(%{"id" => 1}, ctx) == {:reject, :unaccepted}
+    end
+
     test "returns :reject when command processor returns an error" do
       FakeCommandProcessorAgent.set_behavior(fn _request, _opts -> {:error, :failed} end)
       ctx = consume_context()

@@ -44,6 +44,9 @@ if Code.ensure_loaded?(:brod) do
     - `:dead_letter_queue_routing_key` — routing key of a publication the
       message is forwarded to when the handler rejects it (Kafka has no
       native reject).
+    - `:invalid_message_routing_key` — routing key of a publication an
+      unacceptable message (one that fails to decode) is forwarded to;
+      falls back to `:dead_letter_queue_routing_key` when not configured.
     """
 
     use Supervisor
@@ -113,7 +116,8 @@ if Code.ensure_loaded?(:brod) do
         command_processor: command_processor,
         timeout: Keyword.get(subscription, :processing_timeout, :infinity),
         requeue_routing_key: Keyword.get(subscription, :requeue_routing_key),
-        dead_letter_queue_routing_key: Keyword.get(subscription, :dead_letter_queue_routing_key)
+        dead_letter_queue_routing_key: Keyword.get(subscription, :dead_letter_queue_routing_key),
+        invalid_message_routing_key: Keyword.get(subscription, :invalid_message_routing_key)
       ]
 
       config = %{

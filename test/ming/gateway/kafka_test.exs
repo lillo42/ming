@@ -410,6 +410,38 @@ defmodule Ming.Gateway.KafkaTest do
     end
 
     @tag :kafka
+    test "unacceptable messages are forwarded to the invalid message topic" do
+      topic = unique_name("e2e_inv_topic")
+      invalid_topic = unique_name("e2e_inv_invalid")
+
+      gateway_name =
+        boot_e2e_processor(
+          [
+            [routing_key: :e2e_order, topic_or_queue: topic, provision: @provision],
+            [routing_key: :e2e_invalid, topic_or_queue: invalid_topic, provision: @provision]
+          ],
+          [
+            e2e_subscription(unique_name(:e2e_inv_sub), topic, :e2e_order,
+              invalid_message_routing_key: :e2e_invalid
+            )
+          ],
+          [to_string(topic), to_string(invalid_topic)]
+        )
+
+      client = Kafka.client_name(gateway_name)
+
+      assert :ok = :brod.produce_sync(client, to_string(topic), :random, <<>>, "not json{{")
+
+      assert eventually(fn -> fetch_records(invalid_topic) != [] end)
+
+      [record] = fetch_records(invalid_topic)
+      assert kafka_message(record, :value) == "not json{{"
+
+      headers = record |> kafka_message(:headers) |> Map.new()
+      assert headers["ORIGINAL_TOPIC"] == to_string(topic)
+    end
+
+    @tag :kafka
     test "consumes records from foreign producers without CloudEvents headers" do
       topic = unique_name("e2e_foreign_topic")
       name = unique_name(:e2e_foreign_gateway)

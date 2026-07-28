@@ -670,6 +670,86 @@ defmodule Ming.Gateway.AMQPTest do
       headers = Map.new(meta.headers || [], fn {key, _type, value} -> {key, value} end)
       assert headers["cloudEvents:traceparent"] == trace_parent
     end
+
+    defp boot_dlx_processor(chan) do
+      exchange = unique_name("e2e_dlx_exchange")
+      dlx = unique_name("e2e_dlx_dlx")
+      queue = unique_name("e2e_dlx_queue")
+      dlq = unique_name("e2e_dlx_dlq")
+
+      Application.put_env(:ming, :amqp_e2e_pid, self())
+
+      Application.put_env(:ming, AMQPE2EProcessor,
+        gateways: [
+          [
+            adapter: AMQP,
+            name: unique_name(:e2e_cp_gateway),
+            connection: [uri: rabbit_uri(), retry: [max_retries: 1, base_delay: 10]],
+            exchange: [
+              name: to_string(exchange),
+              type: :topic,
+              provision: {:create, durable: true}
+            ],
+            dead_letter_exchange: [
+              name: to_string(dlx),
+              type: :topic,
+              provision: {:create, durable: true}
+            ],
+            publications: [[routing_key: :e2e_shipped]],
+            subscriptions: [
+              [
+                name: unique_name(:e2e_dlx_sub),
+                topic_or_queue: to_string(queue),
+                routing_key: :e2e_shipped,
+                dead_letter: to_string(dlq),
+                provision: {:create, durable: true}
+              ]
+            ]
+          ]
+        ]
+      )
+
+      on_exit(fn ->
+        Application.delete_env(:ming, :amqp_e2e_pid)
+        Application.delete_env(:ming, :amqp_e2e_response)
+        Application.delete_env(:ming, AMQPE2EProcessor)
+
+        try do
+          Queue.delete(chan, to_string(queue))
+          Queue.delete(chan, to_string(dlq))
+          Exchange.delete(chan, to_string(exchange))
+          Exchange.delete(chan, to_string(dlx))
+        catch
+          _, _ -> :ok
+        end
+      end)
+
+      start_supervised!(AMQPE2EProcessor)
+
+      %{exchange: exchange, dlx: dlx, queue: queue, dlq: dlq}
+    end
+
+    test "rejected messages are dead-lettered by the broker", %{amqp_chan: chan} do
+      %{dlq: dlq} = boot_dlx_processor(chan)
+
+      Application.put_env(:ming, :amqp_e2e_response, :reject)
+
+      assert :ok = AMQPE2EProcessor.post(%{"id" => 5}, :e2e_shipped)
+
+      assert_receive {:handled, :e2e_shipped, %{"id" => 5}, _metadata, _assigns}, 5_000
+
+      assert {:ok, payload, _meta} = get_with_retry(chan, dlq)
+      assert JSON.decode!(payload) == %{"id" => 5}
+    end
+
+    test "unacceptable messages are dead-lettered by the broker", %{amqp_chan: chan} do
+      %{exchange: exchange, dlq: dlq} = boot_dlx_processor(chan)
+
+      :ok = Basic.publish(chan, to_string(exchange), "e2e_shipped", "not json{{")
+
+      assert {:ok, "not json{{", _meta} = get_with_retry(chan, dlq)
+      refute_receive {:handled, _, _, _, _}, 500
+    end
   end
 end
 

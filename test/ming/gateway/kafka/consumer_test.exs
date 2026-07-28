@@ -25,7 +25,8 @@ defmodule Ming.Gateway.Kafka.ConsumerTest do
       command_processor: TestKafkaProcessor,
       timeout: :infinity,
       requeue_routing_key: nil,
-      dead_letter_queue_routing_key: nil
+      dead_letter_queue_routing_key: nil,
+      invalid_message_routing_key: nil
     }
     |> Map.merge(Map.new(opts))
   end
@@ -201,8 +202,66 @@ defmodule Ming.Gateway.Kafka.ConsumerTest do
     test "acks rejected messages without a dead letter queue" do
       Application.put_env(:ming, :kafka_test_response, {:ok, :reject})
 
-      assert {:ok, :ack, _state} = Consumer.handle_message(kafka_message(), state())
+      log =
+        capture_log([level: :error], fn ->
+          assert {:ok, :ack, _state} = Consumer.handle_message(kafka_message(), state())
+        end)
 
+      assert log =~ "rejected message and no dead letter queue configured"
+      assert_receive {:consumed, %Message{}, _opts}
+      refute_receive {:posted, _, _}
+    end
+
+    test "forwards unaccepted messages to the invalid message routing key and acks" do
+      Application.put_env(:ming, :kafka_test_response, {:ok, {:reject, :unaccepted}})
+
+      assert {:ok, :ack, _state} =
+               Consumer.handle_message(
+                 kafka_message(),
+                 state(invalid_message_routing_key: :orders_invalid)
+               )
+
+      assert_receive {:consumed, %Message{}, _opts}
+
+      assert_receive {:posted, %Message{} = invalid_message, :orders_invalid}
+      assert invalid_message.headers["ORIGINAL_TOPIC"] == "orders"
+    end
+
+    test "handles unaccepted messages returned bare by a halted pipeline" do
+      Application.put_env(:ming, :kafka_test_response, {:reject, :unaccepted})
+
+      assert {:ok, :ack, _state} =
+               Consumer.handle_message(
+                 kafka_message(),
+                 state(invalid_message_routing_key: :orders_invalid)
+               )
+
+      assert_receive {:consumed, %Message{}, _opts}
+      assert_receive {:posted, %Message{}, :orders_invalid}
+    end
+
+    test "falls back to the dead letter queue for unaccepted messages" do
+      Application.put_env(:ming, :kafka_test_response, {:ok, {:reject, :unaccepted}})
+
+      assert {:ok, :ack, _state} =
+               Consumer.handle_message(
+                 kafka_message(),
+                 state(dead_letter_queue_routing_key: :orders_dlq)
+               )
+
+      assert_receive {:consumed, %Message{}, _opts}
+      assert_receive {:posted, %Message{}, :orders_dlq}
+    end
+
+    test "acks and logs an error for unaccepted messages with no channel configured" do
+      Application.put_env(:ming, :kafka_test_response, {:ok, {:reject, :unaccepted}})
+
+      log =
+        capture_log([level: :error], fn ->
+          assert {:ok, :ack, _state} = Consumer.handle_message(kafka_message(), state())
+        end)
+
+      assert log =~ "unacceptable"
       assert_receive {:consumed, %Message{}, _opts}
       refute_receive {:posted, _, _}
     end

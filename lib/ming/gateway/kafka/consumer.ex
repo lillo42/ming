@@ -10,13 +10,16 @@ if Code.ensure_loaded?(:brod) do
     The subscriber is configured with `message_type: :message`, so
     `handle_message/2` receives one `kafka_message` record at a time.
 
-    Handler results map to offsets: `:ack` commits, `:reject` commits after
+    Handler results map to offsets: `:ack` commits. `:reject` commits after
     forwarding the message to the publication named by the subscription's
     `:dead_letter_queue_routing_key` option when configured (Kafka has no
-    reject), and `:requeue` commits after republishing to the publication
-    named by the subscription's `:requeue_routing_key` option when configured
+    reject). `:requeue` commits after republishing to the publication named
+    by the subscription's `:requeue_routing_key` option when configured
     (Kafka has no requeue) — without one, an error is logged and the message
-    is simply acked.
+    is simply acked. `{:reject, :unaccepted}` (also produced when a message
+    fails to decode) commits after forwarding to the publication named by
+    `:invalid_message_routing_key`, falling back to
+    `:dead_letter_queue_routing_key`.
     """
 
     require Record
@@ -46,7 +49,8 @@ if Code.ensure_loaded?(:brod) do
          command_processor: Keyword.fetch!(cb_config, :command_processor),
          timeout: Keyword.get(cb_config, :timeout, :infinity),
          requeue_routing_key: Keyword.get(cb_config, :requeue_routing_key),
-         dead_letter_queue_routing_key: Keyword.get(cb_config, :dead_letter_queue_routing_key)
+         dead_letter_queue_routing_key: Keyword.get(cb_config, :dead_letter_queue_routing_key),
+         invalid_message_routing_key: Keyword.get(cb_config, :invalid_message_routing_key)
        }}
     end
 
@@ -66,19 +70,22 @@ if Code.ensure_loaded?(:brod) do
         {:ok, :ack} ->
           {:ok, :ack, state}
 
+        {:ok, {:reject, :unaccepted}} ->
+          handle_unaccepted(message, state)
+
+        {:reject, :unaccepted} ->
+          handle_unaccepted(message, state)
+
         {:ok, :reject} ->
-          # Kafka has no reject; forward to the dead letter queue when
-          # configured, then ack to skip the message
-          if dead_letter_queue = state.dead_letter_queue_routing_key do
-            headers =
-              message.headers
-              |> Map.put("ORIGINAL_TIMESTAMP", message.timestamp)
-              |> Map.put("ORIGINAL_TOPIC", state.topic)
-              |> Map.put("ORIGINAL_TYPE", message.type)
+          forward_dead_letter(message, state)
+          {:ok, :ack, state}
 
-            command_processor.post(%Message{message | headers: headers}, dead_letter_queue)
-          end
+        {:ok, {:reject, _reason}} ->
+          forward_dead_letter(message, state)
+          {:ok, :ack, state}
 
+        {:reject, _reason} ->
+          forward_dead_letter(message, state)
           {:ok, :ack, state}
 
         {:ok, :requeue} ->
@@ -89,6 +96,8 @@ if Code.ensure_loaded?(:brod) do
           else
             Logger.error(
               "Kafka does not support requeue; the message was acked and will not be redelivered",
+              message_id: message.id,
+              routing_key: state.routing_key,
               kafka_topic: state.topic,
               kafka_partition: state.partition
             )
@@ -99,6 +108,53 @@ if Code.ensure_loaded?(:brod) do
         {:error, _reason} ->
           {:ok, :ack, state}
       end
+    end
+
+    # Unacceptable (poison) message: forward to the invalid message
+    # channel when configured, falling back to the dead letter queue,
+    # then ack
+    defp handle_unaccepted(message, state) do
+      forward_to = state.invalid_message_routing_key || state.dead_letter_queue_routing_key
+
+      if forward_to do
+        state.command_processor.post(enrich_headers(message, state), forward_to)
+      else
+        Logger.error(
+          "unacceptable message and no invalid message or dead letter queue configured; the message was acked and will not be redelivered",
+          message_id: message.id,
+          routing_key: state.routing_key,
+          kafka_topic: state.topic,
+          kafka_partition: state.partition
+        )
+      end
+
+      {:ok, :ack, state}
+    end
+
+    # Kafka has no reject; forwards to the dead letter queue when
+    # configured, otherwise the message is simply skipped on ack
+    defp forward_dead_letter(message, state) do
+      if dead_letter_queue = state.dead_letter_queue_routing_key do
+        state.command_processor.post(enrich_headers(message, state), dead_letter_queue)
+      else
+        Logger.error(
+          "rejected message and no dead letter queue configured; the message was acked and will not be redelivered",
+          message_id: message.id,
+          routing_key: state.routing_key,
+          kafka_topic: state.topic,
+          kafka_partition: state.partition
+        )
+      end
+    end
+
+    defp enrich_headers(message, state) do
+      headers =
+        message.headers
+        |> Map.put("ORIGINAL_TIMESTAMP", message.timestamp)
+        |> Map.put("ORIGINAL_TOPIC", state.topic)
+        |> Map.put("ORIGINAL_TYPE", message.type)
+
+      %Message{message | headers: headers}
     end
 
     @doc """

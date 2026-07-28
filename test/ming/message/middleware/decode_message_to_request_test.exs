@@ -1,6 +1,8 @@
 defmodule Ming.Message.Middleware.DecodeMessageToRequestTest do
   use ExUnit.Case
 
+  import ExUnit.CaptureLog
+
   alias Ming.Context
   alias Ming.Message
   alias Ming.Message.Middleware.DecodeMessageToRequest
@@ -56,7 +58,7 @@ defmodule Ming.Message.Middleware.DecodeMessageToRequestTest do
       assert DecodeMessageToRequest.before_handle(context(message)) == halted_ctx
     end
 
-    test "halts when mapper returns an error" do
+    test "halts with {:reject, :unaccepted} when mapper returns an error" do
       message = %Message{
         id: "msg-1",
         payload: "data",
@@ -67,10 +69,39 @@ defmodule Ming.Message.Middleware.DecodeMessageToRequestTest do
       FakeMapperAgent.set_to_request(fn _msg -> {:error, :parse_failed} end)
 
       ctx = context(message)
-      result = DecodeMessageToRequest.before_handle(ctx)
 
-      assert Context.halted?(result)
-      assert Context.response(result) == {:error, :parse_failed}
+      log =
+        capture_log([level: :error], fn ->
+          result = DecodeMessageToRequest.before_handle(ctx)
+
+          assert Context.halted?(result)
+          assert Context.response(result) == {:reject, :unaccepted}
+        end)
+
+      assert log =~ "unacceptable message"
+    end
+
+    test "halts with {:reject, :unaccepted} when mapper raises" do
+      message = %Message{
+        id: "msg-1",
+        payload: "data",
+        routing_key: :order_created,
+        timestamp: DateTime.utc_now()
+      }
+
+      FakeMapperAgent.set_to_request(fn _msg -> raise "boom" end)
+
+      ctx = context(message)
+
+      log =
+        capture_log([level: :error], fn ->
+          result = DecodeMessageToRequest.before_handle(ctx)
+
+          assert Context.halted?(result)
+          assert Context.response(result) == {:reject, :unaccepted}
+        end)
+
+      assert log =~ "unacceptable message"
     end
 
     test "uses raw return value as request" do

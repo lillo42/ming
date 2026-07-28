@@ -62,6 +62,12 @@ if Code.ensure_loaded?(AMQP) do
               {:ok, :reject} ->
                 Basic.reject(channel, delivery_tag, requeue: false)
 
+              {:ok, {:reject, _reason}} ->
+                Basic.reject(channel, delivery_tag, requeue: false)
+
+              {:reject, _reason} ->
+                Basic.reject(channel, delivery_tag, requeue: false)
+
               {:ok, :requeue} ->
                 Basic.reject(channel, delivery_tag, requeue: true)
 

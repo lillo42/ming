@@ -8,6 +8,8 @@ defmodule Ming.Message.Middleware.DecodeMessageToRequest do
   `Ming.Message.Mapper.Json` when no mapper is assigned.
   """
 
+  require Logger
+
   alias Ming.Context
 
   @behaviour Ming.Middleware
@@ -16,29 +18,45 @@ defmodule Ming.Message.Middleware.DecodeMessageToRequest do
   Decodes the current `%Ming.Message{}` request into a domain request via
   the configured mapper and stores the original message in assigns.
 
-  Halts with an error if the mapper returns an invalid response.
+  Decodes the current `%Ming.Message{}` request into a domain request via
+  the configured mapper and stores the original message in assigns.
+
+  Halts with `{:reject, :unaccepted}` when the mapper fails to decode the
+  message (an error reply or a raised exception), marking it as an
+  unacceptable message.
   """
   @impl Ming.Middleware
   def before_handle(context)
 
   def before_handle(%Context{assigns: %{mapper: mapper}, request: message} = context) do
-    case mapper.to_request(message, context) do
-      {:ok, request} ->
-        %Context{context | request: request}
-        |> Context.assign(:original_message, message)
+    try do
+      case mapper.to_request(message, context) do
+        {:ok, request} ->
+          %Context{context | request: request}
+          |> Context.assign(:original_message, message)
 
-      %Context{} = other_context ->
-        other_context
+        %Context{} = other_context ->
+          other_context
 
-      {:error, _reason} = reply ->
-        context
-        |> Context.halt()
-        |> Context.respond(reply)
+        {:error, reason} ->
+          unaccepted(context, reason)
 
-      request ->
-        %Context{context | request: request}
-        |> Context.assign(:original_message, message)
+        request ->
+          %Context{context | request: request}
+          |> Context.assign(:original_message, message)
+      end
+    rescue
+      e ->
+        unaccepted(context, e)
     end
+  end
+
+  defp unaccepted(context, reason) do
+    Logger.error("unacceptable message, failed to decode payload: #{inspect(reason)}")
+
+    context
+    |> Context.halt()
+    |> Context.respond({:reject, :unaccepted})
   end
 
   def before_handle(%Context{} = context) do
