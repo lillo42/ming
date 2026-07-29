@@ -20,9 +20,8 @@ defmodule RabbitMQSample.MixProject do
 
   defp deps do
     [
-      {:ming, path: "../.."},
-      {:amqp, "~> 4.1"},
-      {:nimble_pool, "~> 1.1"}
+      {:ming, path: "../../apps/ming"},
+      {:ming_amqp, path: "../../apps/ming_amqp"}
     ]
   end
 end

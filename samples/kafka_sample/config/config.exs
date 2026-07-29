@@ -8,7 +8,7 @@ import Config
 config :kafka_sample, KafkaSample.CommandProcessor,
   gateways: [
     [
-      adapter: Ming.Gateway.Kafka,
+      adapter: Ming.Gateway.Brod,
       name: :kafka_gateway,
       connection: [
         endpoints: [{"localhost", 9092}]

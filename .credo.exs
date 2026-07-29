@@ -5,8 +5,7 @@
       name: "default",
       files: %{
         included: [
-          "lib/",
-          "test/"
+          "apps/"
         ],
         excluded: [~r"/_build/", ~r"/deps/", ~r"/node_modules/"]
       },

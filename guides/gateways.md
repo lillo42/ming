@@ -46,14 +46,13 @@ The `:command_processor` option is injected automatically by `Ming.CommandProces
 
 `Ming.Gateway.AMQP` connects to RabbitMQ or another AMQP broker. It manages connections, publisher pools, and consumers, and can provision exchanges and queues before startup.
 
-Add `:amqp` and `:nimble_pool` to your dependencies:
+Add `:ming_amqp` to your dependencies:
 
 ```elixir
 defp deps do
   [
     {:ming, "~> 0.2.0"},
-    {:amqp, "~> 4.1"},
-    {:nimble_pool, "~> 1.1"}
+    {:ming_amqp, "~> 0.2.0"}
   ]
 end
 ```
@@ -109,15 +108,15 @@ Notes:
 
 ## Kafka gateway
 
-`Ming.Gateway.Kafka` connects to Apache Kafka via `:brod`. It manages a single `:brod` client per gateway, one consumer group subscriber per subscription, and can provision topics before startup.
+`Ming.Gateway.Brod` connects to Apache Kafka via `:brod`. It manages a single `:brod` client per gateway, one consumer group subscriber per subscription, and can provision topics before startup.
 
-Add `:brod` to your dependencies:
+Add `:ming_brod` to your dependencies:
 
 ```elixir
 defp deps do
   [
     {:ming, "~> 0.2.0"},
-    {:brod, "~> 4.5"}
+    {:ming_brod, "~> 0.2.0"}
   ]
 end
 ```
@@ -128,7 +127,7 @@ Example configuration:
 config :my_app, MyApp.CommandProcessor,
   gateways: [
     [
-      adapter: Ming.Gateway.Kafka,
+      adapter: Ming.Gateway.Brod,
       name: :kafka_gateway,
       connection: [
         endpoints: [{"localhost", 9092}]
@@ -152,7 +151,7 @@ config :my_app, MyApp.CommandProcessor,
 Notes:
 
 - `:topic_or_queue` is the Kafka topic and is required on both publications and subscriptions.
-- The `:brod` client is registered as `:"#{name}_client"` (see `Ming.Gateway.Kafka.client_name/1`).
+- The `:brod` client is registered as `:"#{name}_client"` (see `Ming.Gateway.Brod.client_name/1`).
 - Any extra `:connection` keys are passed through to `:brod.start_link_client/3`.
 - Subscription-only options:
   - `:group_id` — Kafka consumer group id, defaults to the subscription name.

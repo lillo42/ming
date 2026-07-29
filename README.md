@@ -199,14 +199,13 @@ For queues and exchanges, `:provision` also accepts `{:create, opts}` / `{:creat
 
 A runnable version of this setup is available in [`samples/rabbitmq_sample`](samples/rabbitmq_sample).
 
-Add `:amqp` and `:nimble_pool` to your dependencies to use the AMQP gateway:
+Add `:ming_amqp` to your dependencies to use the AMQP gateway:
 
 ```elixir
 defp deps do
   [
     {:ming, "~> 0.2.0"},
-    {:amqp, "~> 4.1"},
-    {:nimble_pool, "~> 1.1"}
+    {:ming_amqp, "~> 0.2.0"}
   ]
 end
 ```
@@ -219,14 +218,14 @@ MyApp.CommandProcessor.post(%OrderCreated{id: 123})
 
 ### Kafka Gateway
 
-`Ming.Gateway.Kafka` connects to Apache Kafka via `:brod`. It manages a single `:brod` client per gateway and one consumer group subscriber per subscription, and provisions topics before startup.
+`Ming.Gateway.Brod` connects to Apache Kafka via `:brod`. It manages a single `:brod` client per gateway and one consumer group subscriber per subscription, and provisions topics before startup.
 
 ```elixir
 # config/runtime.exs or config/config.exs
 config :my_app, MyApp.CommandProcessor,
   gateways: [
     [
-      adapter: Ming.Gateway.Kafka,
+      adapter: Ming.Gateway.Brod,
       name: :my_kafka_gateway,
       connection: [
         endpoints: [{"localhost", 9092}]
@@ -247,13 +246,13 @@ config :my_app, MyApp.CommandProcessor,
   ]
 ```
 
-Add `:brod` to your dependencies to use the Kafka gateway:
+Add `:ming_brod` to your dependencies to use the Kafka gateway:
 
 ```elixir
 defp deps do
   [
     {:ming, "~> 0.2.0"},
-    {:brod, "~> 4.5"}
+    {:ming_brod, "~> 0.2.0"}
   ]
 end
 ```

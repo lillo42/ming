@@ -20,8 +20,8 @@ defmodule KafkaSample.MixProject do
 
   defp deps do
     [
-      {:ming, path: "../.."},
-      {:brod, "~> 4.5"}
+      {:ming, path: "../../apps/ming"},
+      {:ming_brod, path: "../../apps/ming_brod"}
     ]
   end
 end
