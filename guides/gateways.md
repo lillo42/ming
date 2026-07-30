@@ -166,6 +166,58 @@ Messages are published with CloudEvents attributes as `ce_`-prefixed Kafka heade
 
 Handler results map to offsets as follows: `:ack` commits. `:reject` commits after forwarding the message to the publication named by the subscription's `:dead_letter_queue_routing_key` option, when configured (Kafka has no reject; the forwarded message carries `ORIGINAL_TIMESTAMP`, `ORIGINAL_TOPIC`, and `ORIGINAL_TYPE` headers). `:requeue` commits after republishing the message to the publication named by the subscription's `:requeue_routing_key` option, when configured (Kafka has no requeue) — without one, an error is logged (`"Kafka does not support requeue; the message was acked and will not be redelivered"`) and the message is acked.
 
+## Kafka gateway (kafka_ex)
+
+`Ming.Gateway.KafkaEx` connects to Apache Kafka via `:kafka_ex`. It manages a single `KafkaEx` client per gateway, one `KafkaEx.Consumer.ConsumerGroup` per subscription, and can provision topics before startup. It accepts the same configuration as `Ming.Gateway.Brod` — only the adapter module and dependency differ.
+
+Add `:ming_kafka_ex` to your dependencies:
+
+```elixir
+defp deps do
+  [
+    {:ming, "~> 0.2.0"},
+    {:ming_kafka_ex, "~> 0.2.0"}
+  ]
+end
+```
+
+Example configuration:
+
+```elixir
+config :my_app, MyApp.CommandProcessor,
+  gateways: [
+    [
+      adapter: Ming.Gateway.KafkaEx,
+      name: :kafka_gateway,
+      connection: [
+        endpoints: [{"localhost", 9092}]
+      ],
+      publications: [
+        [routing_key: :order_created, topic_or_queue: "orders"]
+      ],
+      subscriptions: [
+        [
+          name: :orders,
+          topic_or_queue: "orders",
+          routing_key: :order_created,
+          group_id: "my-app",
+          consumer_config: [auto_offset_reset: :earliest],
+          provision: {:create, num_partitions: 3, replication_factor: 1}
+        ]
+      ]
+    ]
+  ]
+```
+
+Notes:
+
+- The `KafkaEx` client is registered as `:"#{name}_client"` (see `Ming.Gateway.KafkaEx.client_name/1`).
+- Any extra `:connection` keys are passed through to `KafkaEx.API.start_client/1` (e.g. `:use_ssl`, `:ssl_options`, `:auth`).
+- `:consumer_config` and `:group_config` are passed through to `KafkaEx.Consumer.ConsumerGroup.start_link/4` (`:consumer_config` holds `KafkaEx.Consumer.GenConsumer` options such as `:auto_offset_reset`, `:commit_interval` and `:commit_threshold`; `:group_config` holds group options such as `:heartbeat_interval` and `:session_timeout`).
+- The kafka_ex OTP application-wide default worker is not needed; set `config :kafka_ex, disable_default_worker: true` (the umbrella config already does).
+- Messages are consumed in batches; each record is processed individually and the batch offset is committed asynchronously once the whole batch has been handled.
+- Ack/reject/requeue semantics, CloudEvents headers and topic provisioning behave exactly as described for the `:brod` gateway above.
+
 ## Publishing and consuming
 
 Use `post/2` on your command processor module to publish a message through the configured gateway:

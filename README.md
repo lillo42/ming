@@ -261,6 +261,49 @@ end
 
 A runnable version of this setup is available in [`samples/kafka_sample`](samples/kafka_sample).
 
+### Kafka Gateway (kafka_ex)
+
+`Ming.Gateway.KafkaEx` is an alternative Kafka gateway backed by the `:kafka_ex` library instead of `:brod`. It manages a single `KafkaEx` client per gateway and one `KafkaEx.Consumer.ConsumerGroup` per subscription, and provisions topics before startup. The configuration is identical to the `:brod` gateway, only the adapter changes:
+
+```elixir
+# config/runtime.exs or config/config.exs
+config :my_app, MyApp.CommandProcessor,
+  gateways: [
+    [
+      adapter: Ming.Gateway.KafkaEx,
+      name: :my_kafka_gateway,
+      connection: [
+        endpoints: [{"localhost", 9092}]
+      ],
+      publications: [
+        [routing_key: :order_created, topic_or_queue: "orders"]
+      ],
+      subscriptions: [
+        [
+          name: :orders,
+          topic_or_queue: "orders",
+          routing_key: :order_created,
+          group_id: "my-app",
+          provision: {:create, num_partitions: 3, replication_factor: 1}
+        ]
+      ]
+    ]
+  ]
+```
+
+Add `:ming_kafka_ex` to your dependencies to use this Kafka gateway:
+
+```elixir
+defp deps do
+  [
+    {:ming, "~> 0.2.0"},
+    {:ming_kafka_ex, "~> 0.2.0"}
+  ]
+end
+```
+
+`:consumer_config`/`:group_config` are passed through to `KafkaEx.Consumer.ConsumerGroup` (e.g. `consumer_config: [auto_offset_reset: :earliest]`). See the [gateways guide](guides/gateways.md) for the full option list.
+
 ## Samples
 
 Complete runnable applications demonstrating the messaging gateways end to end:

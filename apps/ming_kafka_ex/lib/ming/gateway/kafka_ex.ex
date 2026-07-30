@@ -1,16 +1,16 @@
-defmodule Ming.Gateway.Brod do
+defmodule Ming.Gateway.KafkaEx do
   @moduledoc """
-  Kafka gateway supervisor that manages a `:brod` client and group subscribers.
+  Kafka gateway supervisor that manages a `KafkaEx` client and consumer groups.
 
   This module implements the `Ming.Gateway` behaviour and starts a supervision tree
   with the following children:
-  - a single `:brod` client
-  - one `:brod_group_subscriber_v2` per configured subscription
+  - a single `KafkaEx` client
+  - one `KafkaEx.Consumer.ConsumerGroup` per configured subscription
 
   ## Example configuration
 
       [
-        adapter: Ming.Gateway.Brod,
+        adapter: Ming.Gateway.KafkaEx,
         name: :my_kafka,
         connection: [
           endpoints: [{"localhost", 9092}]
@@ -36,8 +36,11 @@ defmodule Ming.Gateway.Brod do
   - `:group_id` — Kafka consumer group id, defaults to the subscription name.
   - `:processing_timeout` — timeout passed to the command processor,
     defaults to `:infinity`.
-  - `:consumer_config` — extra `:brod` consumer config, defaults to `[]`.
-  - `:group_config` — extra `:brod` group config, defaults to `[]`.
+  - `:consumer_config` — extra `KafkaEx.Consumer.GenConsumer` options
+    (e.g. `:auto_offset_reset`, `:commit_interval`, `:commit_threshold`),
+    defaults to `[]`.
+  - `:group_config` — extra `KafkaEx.Consumer.ConsumerGroup` options
+    (e.g. `:heartbeat_interval`, `:session_timeout`), defaults to `[]`.
   - `:requeue_routing_key` — routing key of a publication the message is
     republished to when the handler requeues it (Kafka has no native requeue).
   - `:dead_letter_queue_routing_key` — routing key of a publication the
@@ -50,7 +53,10 @@ defmodule Ming.Gateway.Brod do
 
   use Supervisor
 
-  alias Ming.Gateway.Brod.Consumer
+  alias Elixir.KafkaEx.API, as: KafkaExAPI
+  alias Elixir.KafkaEx.Consumer.ConsumerGroup
+  alias Elixir.KafkaEx.Messages.CreateTopics
+  alias Ming.Gateway.KafkaEx.Consumer
 
   @doc """
   Starts the Kafka gateway supervisor.
@@ -68,10 +74,14 @@ defmodule Ming.Gateway.Brod do
     connection = Keyword.fetch!(args, :connection)
     endpoints = Keyword.fetch!(connection, :endpoints)
 
-    client_config =
+    client_opts =
       connection
       |> Keyword.delete(:endpoints)
-      |> Keyword.put_new(:auto_start_producers, true)
+      |> Keyword.merge(
+        name: client,
+        brokers: endpoints,
+        consumer_group: :no_consumer_group
+      )
 
     children =
       [
@@ -79,11 +89,11 @@ defmodule Ming.Gateway.Brod do
           id: client,
           type: :worker,
           restart: :permanent,
-          start: {:brod, :start_link_client, [endpoints, client, client_config]}
+          start: {KafkaExAPI, :start_client, [client_opts]}
         }
       ]
       |> add_subscriptions(
-        client,
+        endpoints,
         Keyword.get(args, :command_processor),
         Keyword.get(args, :subscriptions, [])
       )
@@ -92,58 +102,59 @@ defmodule Ming.Gateway.Brod do
   end
 
   @doc """
-  Returns the `:brod` client name used for a given gateway name.
+  Returns the `KafkaEx` client name used for a given gateway name.
   """
   @spec client_name(atom() | String.t()) :: atom()
   def client_name(name), do: :"#{name}_client"
 
-  defp add_subscriptions(acc, _gateway_name, nil, []), do: acc
+  defp add_subscriptions(acc, _endpoints, nil, []), do: acc
 
-  defp add_subscriptions(_acc, _gateway_name, nil, [_subscription | _]) do
+  defp add_subscriptions(_acc, _endpoints, nil, [_subscription | _]) do
     raise ArgumentError,
           "Kafka gateway requires :command_processor when subscriptions are configured"
   end
 
-  defp add_subscriptions(acc, _gateway_name, _command_processor, []), do: acc
+  defp add_subscriptions(acc, _endpoints, _command_processor, []), do: acc
 
-  defp add_subscriptions(acc, gateway_name, command_processor, [subscription | next]) do
+  defp add_subscriptions(acc, endpoints, command_processor, [subscription | next]) do
     name = Keyword.fetch!(subscription, :name)
     topic = subscription |> Keyword.fetch!(:topic_or_queue) |> to_string()
 
-    init_data = [
+    init_data = %{
       routing_key: Keyword.fetch!(subscription, :routing_key),
       command_processor: command_processor,
       timeout: Keyword.get(subscription, :processing_timeout, :infinity),
       requeue_routing_key: Keyword.get(subscription, :requeue_routing_key),
       dead_letter_queue_routing_key: Keyword.get(subscription, :dead_letter_queue_routing_key),
       invalid_message_routing_key: Keyword.get(subscription, :invalid_message_routing_key)
-    ]
-
-    config = %{
-      client: gateway_name,
-      group_id: Keyword.get(subscription, :group_id, to_string(name)),
-      topics: [topic],
-      cb_module: Consumer,
-      message_type: :message,
-      init_data: init_data,
-      consumer_config: Keyword.get(subscription, :consumer_config, []),
-      group_config: Keyword.get(subscription, :group_config, [])
     }
+
+    consumer_group_opts =
+      [uris: endpoints, extra_consumer_args: init_data]
+      |> Keyword.merge(Keyword.get(subscription, :consumer_config, []))
+      |> Keyword.merge(Keyword.get(subscription, :group_config, []))
 
     child = %{
       id: name,
-      type: :worker,
+      type: :supervisor,
       restart: :permanent,
-      start: {:brod, :start_link_group_subscriber_v2, [config]}
+      start:
+        {ConsumerGroup, :start_link,
+         [
+           Consumer,
+           Keyword.get(subscription, :group_id, to_string(name)),
+           [topic],
+           consumer_group_opts
+         ]}
     }
 
-    [child | add_subscriptions(acc, gateway_name, command_processor, next)]
+    [child | add_subscriptions(acc, endpoints, command_processor, next)]
   end
 
   @behaviour Ming.Gateway
 
   @impl Ming.Gateway
-  def producer, do: Ming.Gateway.Brod.Producer
+  def producer, do: Ming.Gateway.KafkaEx.Producer
 
   @doc """
   Provisions Kafka infrastructure (topics) before the gateway starts.
@@ -166,73 +177,86 @@ defmodule Ming.Gateway.Brod do
       |> Keyword.fetch!(:connection)
       |> Keyword.fetch!(:endpoints)
 
-    topics = Keyword.get(args, :publications, []) ++ Keyword.get(args, :subscriptions, [])
+    topics =
+      (Keyword.get(args, :publications, []) ++ Keyword.get(args, :subscriptions, []))
+      |> Enum.reject(fn config ->
+        is_nil(Keyword.get(config, :topic_or_queue)) or
+          Keyword.get(config, :provision, :assume) == :assume
+      end)
 
-    ensure_topics_exists(endpoints, topics)
+    if topics == [] do
+      :ok
+    else
+      provision_topics(endpoints, topics)
+    end
   end
 
-  defp ensure_topics_exists(endpoints, configs) do
+  defp provision_topics(endpoints, topics) do
+    case KafkaExAPI.start_client(brokers: endpoints, consumer_group: :no_consumer_group) do
+      {:ok, client} ->
+        try do
+          ensure_topics_exists(client, topics)
+        after
+          GenServer.stop(client)
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp ensure_topics_exists(client, configs) do
     Enum.reduce_while(configs, :ok, fn config, :ok ->
       topic = Keyword.get(config, :topic_or_queue)
       provision = Keyword.get(config, :provision, :assume)
 
-      case ensure_topic_exists(endpoints, topic, provision) do
+      case ensure_topic_exists(client, topic, provision) do
         :ok -> {:cont, :ok}
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
   end
 
-  defp ensure_topic_exists(_endpoints, nil, _provision), do: :ok
-  defp ensure_topic_exists(_endpoints, _topic, :assume), do: :ok
+  defp ensure_topic_exists(_client, nil, _provision), do: :ok
+  defp ensure_topic_exists(_client, _topic, :assume), do: :ok
 
-  defp ensure_topic_exists(endpoints, topic, :validate) do
-    case fetch_metadata(endpoints, to_string(topic)) do
-      {:ok, _metadata} -> :ok
+  defp ensure_topic_exists(client, topic, :validate) do
+    case KafkaExAPI.topics_metadata(client, [to_string(topic)]) do
+      {:ok, [_topic | _]} -> :ok
+      {:ok, []} -> {:error, :unknown_topic_or_partition}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp ensure_topic_exists(endpoints, topic, provision) do
+  defp ensure_topic_exists(client, topic, provision) do
     opts =
       case provision do
         :create -> []
         {:create, opts} -> opts
       end
 
-    topic_config = %{
-      name: to_string(topic),
-      num_partitions: Keyword.get(opts, :num_partitions, 1),
-      replication_factor: Keyword.get(opts, :replication_factor, 1),
-      assignments: [],
-      configs: Keyword.get(opts, :configs, [])
-    }
+    config_entries =
+      opts
+      |> Keyword.get(:configs, [])
+      |> Enum.map(fn {key, value} -> {to_string(key), to_string(value)} end)
 
-    case create_topic(endpoints, topic_config) do
-      :ok -> :ok
-      {:error, reason} -> if already_exists?(reason), do: :ok, else: {:error, reason}
+    result =
+      KafkaExAPI.create_topic(client, to_string(topic),
+        num_partitions: Keyword.get(opts, :num_partitions, 1),
+        replication_factor: Keyword.get(opts, :replication_factor, 1),
+        config_entries: config_entries
+      )
+
+    case result do
+      {:ok, %CreateTopics{} = created} ->
+        case CreateTopics.failed_topics(created) do
+          [] -> :ok
+          [%{error: :topic_already_exists} | _] -> :ok
+          [%{error: error} | _] -> {:error, error}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
-
-  # brod throws errors instead of returning {:error, reason}
-  defp fetch_metadata(endpoints, topic) do
-    :brod.get_metadata(endpoints, [topic])
-  catch
-    :throw, reason -> {:error, reason}
-  end
-
-  defp create_topic(endpoints, topic_config) do
-    :brod.create_topics(endpoints, [topic_config], %{timeout: 10_000})
-  catch
-    :throw, reason -> {:error, reason}
-  end
-
-  defp already_exists?(:topic_already_exists), do: true
-
-  # Apache Kafka reports "already exists" while Redpanda reports
-  # "has already been created"
-  defp already_exists?(reason) when is_binary(reason),
-    do: reason =~ "already exists" or reason =~ "already been created"
-
-  defp already_exists?(_reason), do: false
 end

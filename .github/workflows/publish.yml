@@ -87,3 +87,7 @@ jobs:
       - name: publish ming_brod
         run: mix hex.publish --yes
         working-directory: apps/ming_brod
+
+      - name: publish ming_kafka_ex
+        run: mix hex.publish --yes
+        working-directory: apps/ming_kafka_ex

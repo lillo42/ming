@@ -9,5 +9,8 @@ services:
       - --memory=1G
       - --kafka-addr=PLAINTEXT://0.0.0.0:9092
       - --advertise-kafka-addr=PLAINTEXT://localhost:9092
+      # dev-container mode enables auto topic creation; disable it so
+      # "validate topic exists" provisioning behaves like Apache Kafka
+      - --set=redpanda.auto_create_topics_enabled=false
     ports:
       - "9092:9092"
