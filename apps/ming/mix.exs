@@ -60,7 +60,7 @@ defmodule Ming.MixProject do
       maintainers: ["Rafael Andrade"],
       licenses: ["GPL-3.0"],
       links: %{"GitHub" => @source_url},
-      files: ~w(.formatter.exs mix.exs README.md lib)
+      files: ~w(mix.exs lib)
     ]
   end
 

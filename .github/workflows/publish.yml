@@ -76,5 +76,14 @@ jobs:
       - name: set up api key
         run: mix hex.config api_key ${{secrets.HEX_API_KEY}}
 
-      - name: publish
+      - name: publish ming
         run: mix hex.publish --yes
+        working-directory: apps/ming
+
+      - name: publish ming_amqp
+        run: mix hex.publish --yes
+        working-directory: apps/ming_amqp
+
+      - name: publish ming_brod
+        run: mix hex.publish --yes
+        working-directory: apps/ming_brod

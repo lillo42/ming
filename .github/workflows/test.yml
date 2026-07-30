@@ -181,4 +181,4 @@ jobs:
           exit 1
 
       - name: Run Kafka integration tests
-        run: mix test --only kafka
+        run: mix test --only brod
