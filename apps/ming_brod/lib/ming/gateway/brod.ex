@@ -188,7 +188,7 @@ defmodule Ming.Gateway.Brod do
 
   defp ensure_topic_exists(endpoints, topic, :validate) do
     case fetch_metadata(endpoints, to_string(topic)) do
-      {:ok, _metadata} -> :ok
+      {:ok, metadata} -> check_topic_error(metadata, to_string(topic))
       {:error, reason} -> {:error, reason}
     end
   end
@@ -219,6 +219,19 @@ defmodule Ming.Gateway.Brod do
     :brod.get_metadata(endpoints, [topic])
   catch
     :throw, reason -> {:error, reason}
+  end
+
+  # brod returns {:ok, metadata} even for missing topics; the error is
+  # reported per topic in the metadata response
+  defp check_topic_error(metadata, topic) do
+    metadata
+    |> Map.get(:topics, [])
+    |> Enum.find(fn entry -> Map.get(entry, :name) == topic end)
+    |> case do
+      %{error_code: :no_error} -> :ok
+      %{error_code: error} -> {:error, error}
+      nil -> {:error, :unknown_topic_or_partition}
+    end
   end
 
   defp create_topic(endpoints, topic_config) do

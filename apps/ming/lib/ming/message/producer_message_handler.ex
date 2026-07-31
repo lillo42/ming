@@ -39,7 +39,8 @@ defmodule Ming.Message.ProducerMessageHandler do
       ) do
     extra_opts = Map.get(metadata, :producer_opts, [])
 
-    producer = gateway |> Keyword.fetch!(:adapter) |> apply(:producer, [])
+    adapter = Keyword.fetch!(gateway, :adapter)
+    producer = adapter.producer()
 
     producer.publish(request,
       gateway: gateway,
