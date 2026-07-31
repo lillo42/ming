@@ -34,6 +34,11 @@ defmodule Ming.Gateway.Brod do
   - `:topic_or_queue` (required) — Kafka topic to consume from.
   - `:routing_key` (required) — Ming routing key set on consumed messages.
   - `:group_id` — Kafka consumer group id, defaults to the subscription name.
+  - `:number_of_performer` — how many group subscribers are started for the
+    subscription, defaults to `1`. Each subscriber joins `:group_id` as an
+    independent consumer group member, so the topic's partitions are split
+    between them. Members beyond the partition count stay idle; raise
+    `:num_partitions` (see below) to scale parallelism further.
   - `:processing_timeout` — timeout passed to the command processor,
     defaults to `:infinity`.
   - `:consumer_config` — extra `:brod` consumer config, defaults to `[]`.
@@ -109,6 +114,7 @@ defmodule Ming.Gateway.Brod do
   defp add_subscriptions(acc, gateway_name, command_processor, [subscription | next]) do
     name = Keyword.fetch!(subscription, :name)
     topic = subscription |> Keyword.fetch!(:topic_or_queue) |> to_string()
+    performers = number_of_performers(subscription)
 
     init_data = [
       routing_key: Keyword.fetch!(subscription, :routing_key),
@@ -130,15 +136,32 @@ defmodule Ming.Gateway.Brod do
       group_config: Keyword.get(subscription, :group_config, [])
     }
 
-    child = %{
-      id: name,
-      type: :worker,
-      restart: :permanent,
-      start: {:brod, :start_link_group_subscriber_v2, [config]}
-    }
+    children =
+      for index <- 1..performers do
+        %{
+          id: performer_id(name, index, performers),
+          type: :worker,
+          restart: :permanent,
+          start: {:brod, :start_link_group_subscriber_v2, [config]}
+        }
+      end
 
-    [child | add_subscriptions(acc, gateway_name, command_processor, next)]
+    children ++ add_subscriptions(acc, gateway_name, command_processor, next)
   end
+
+  defp number_of_performers(subscription) do
+    case Keyword.get(subscription, :number_of_performer, 1) do
+      performers when is_integer(performers) and performers >= 1 ->
+        performers
+
+      other ->
+        raise ArgumentError,
+              ":number_of_performer must be a positive integer, got: #{inspect(other)}"
+    end
+  end
+
+  defp performer_id(name, _index, 1), do: name
+  defp performer_id(name, index, _performers), do: {name, index}
 
   @behaviour Ming.Gateway
 

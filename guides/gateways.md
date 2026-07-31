@@ -155,6 +155,7 @@ Notes:
 - Any extra `:connection` keys are passed through to `:brod.start_link_client/3`.
 - Subscription-only options:
   - `:group_id` — Kafka consumer group id, defaults to the subscription name.
+  - `:number_of_performer` — how many group subscribers are started for the subscription, defaults to `1`. Each subscriber joins `:group_id` as an independent consumer group member, so the topic's partitions are split between them; members beyond the partition count stay idle.
   - `:processing_timeout` — timeout passed to the command processor, defaults to `:infinity`.
   - `:consumer_config` and `:group_config` — passed through to `:brod_group_subscriber_v2`.
   - `:requeue_routing_key` — routing key of a publication the message is republished to when the handler requeues it.
@@ -168,7 +169,7 @@ Handler results map to offsets as follows: `:ack` commits. `:reject` commits aft
 
 ## Kafka gateway (kafka_ex)
 
-`Ming.Gateway.KafkaEx` connects to Apache Kafka via `:kafka_ex`. It manages a single `KafkaEx` client per gateway, one `KafkaEx.Consumer.ConsumerGroup` per subscription, and can provision topics before startup. It accepts the same configuration as `Ming.Gateway.Brod` — only the adapter module and dependency differ.
+`Ming.Gateway.KafkaEx` connects to Apache Kafka via `:kafka_ex`. It manages a single `KafkaEx` client per gateway, one `KafkaEx.Consumer.ConsumerGroup` per subscription (or per performer when `:number_of_performer` is set), and can provision topics before startup. It accepts the same configuration as `Ming.Gateway.Brod` — only the adapter module and dependency differ.
 
 Add `:ming_kafka_ex` to your dependencies:
 

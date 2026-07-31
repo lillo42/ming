@@ -34,6 +34,11 @@ defmodule Ming.Gateway.KafkaEx do
   - `:topic_or_queue` (required) — Kafka topic to consume from.
   - `:routing_key` (required) — Ming routing key set on consumed messages.
   - `:group_id` — Kafka consumer group id, defaults to the subscription name.
+  - `:number_of_performer` — how many consumer groups are started for the
+    subscription, defaults to `1`. Each one joins `:group_id` as an
+    independent consumer group member, so the topic's partitions are split
+    between them. Members beyond the partition count stay idle; raise
+    `:num_partitions` (see below) to scale parallelism further.
   - `:processing_timeout` — timeout passed to the command processor,
     defaults to `:infinity`.
   - `:consumer_config` — extra `KafkaEx.Consumer.GenConsumer` options
@@ -119,6 +124,7 @@ defmodule Ming.Gateway.KafkaEx do
   defp add_subscriptions(acc, endpoints, command_processor, [subscription | next]) do
     name = Keyword.fetch!(subscription, :name)
     topic = subscription |> Keyword.fetch!(:topic_or_queue) |> to_string()
+    performers = number_of_performers(subscription)
 
     init_data = %{
       routing_key: Keyword.fetch!(subscription, :routing_key),
@@ -134,22 +140,34 @@ defmodule Ming.Gateway.KafkaEx do
       |> Keyword.merge(Keyword.get(subscription, :consumer_config, []))
       |> Keyword.merge(Keyword.get(subscription, :group_config, []))
 
-    child = %{
-      id: name,
-      type: :supervisor,
-      restart: :permanent,
-      start:
-        {ConsumerGroup, :start_link,
-         [
-           Consumer,
-           Keyword.get(subscription, :group_id, to_string(name)),
-           [topic],
-           consumer_group_opts
-         ]}
-    }
+    group_id = Keyword.get(subscription, :group_id, to_string(name))
 
-    [child | add_subscriptions(acc, endpoints, command_processor, next)]
+    children =
+      for index <- 1..performers do
+        %{
+          id: performer_id(name, index, performers),
+          type: :supervisor,
+          restart: :permanent,
+          start: {ConsumerGroup, :start_link, [Consumer, group_id, [topic], consumer_group_opts]}
+        }
+      end
+
+    children ++ add_subscriptions(acc, endpoints, command_processor, next)
   end
+
+  defp number_of_performers(subscription) do
+    case Keyword.get(subscription, :number_of_performer, 1) do
+      performers when is_integer(performers) and performers >= 1 ->
+        performers
+
+      other ->
+        raise ArgumentError,
+              ":number_of_performer must be a positive integer, got: #{inspect(other)}"
+    end
+  end
+
+  defp performer_id(name, _index, 1), do: name
+  defp performer_id(name, index, _performers), do: {name, index}
 
   @behaviour Ming.Gateway
 
