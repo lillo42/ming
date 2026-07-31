@@ -17,6 +17,11 @@ defmodule Ming.Gateway.Brod.ConsumerTest do
      Keyword.get(opts, :headers, [])}
   end
 
+  # brod kafka_message_set record: {kafka_message_set, topic, partition, high_wm, messages}
+  defp message_set(messages) do
+    {:kafka_message_set, "orders", 0, length(messages), messages}
+  end
+
   defp state(opts \\ []) do
     %{
       topic: "orders",
@@ -139,7 +144,7 @@ defmodule Ming.Gateway.Brod.ConsumerTest do
     test "dispatches to the command processor and acks" do
       record = kafka_message(value: "hello", headers: [{"ce_id", "msg-ack"}])
 
-      assert {:ok, :ack, state} = Consumer.handle_message(record, state())
+      assert {:ok, :ack, state} = Consumer.handle_message(message_set([record]), state())
 
       assert_receive {:consumed, %Message{payload: "hello", id: "msg-ack"}, opts}
       assert opts[:routing_key] == :ming_consume_message
@@ -152,10 +157,21 @@ defmodule Ming.Gateway.Brod.ConsumerTest do
       assert state.routing_key == :order_created
     end
 
+    test "processes every message in the set and acks the batch" do
+      records = [kafka_message(value: "one"), kafka_message(value: "two")]
+
+      assert {:ok, :ack, _state} = Consumer.handle_message(message_set(records), state())
+
+      assert_receive {:consumed, %Message{payload: "one"}, _opts}
+      assert_receive {:consumed, %Message{payload: "two"}, _opts}
+    end
+
     test "acks when the processor rejects the message" do
       Application.put_env(:ming, :brod_test_response, {:ok, :reject})
 
-      assert {:ok, :ack, _state} = Consumer.handle_message(kafka_message(), state())
+      assert {:ok, :ack, _state} =
+               Consumer.handle_message(message_set([kafka_message()]), state())
+
       assert_receive {:consumed, %Message{}, _opts}
     end
 
@@ -164,7 +180,8 @@ defmodule Ming.Gateway.Brod.ConsumerTest do
 
       log =
         capture_log([level: :error], fn ->
-          assert {:ok, :ack, _state} = Consumer.handle_message(kafka_message(), state())
+          assert {:ok, :ack, _state} =
+                   Consumer.handle_message(message_set([kafka_message()]), state())
         end)
 
       assert log =~ "Kafka does not support requeue"
@@ -176,7 +193,10 @@ defmodule Ming.Gateway.Brod.ConsumerTest do
       Application.put_env(:ming, :brod_test_response, {:ok, :requeue})
 
       assert {:ok, :ack, _state} =
-               Consumer.handle_message(kafka_message(), state(requeue_routing_key: :orders_retry))
+               Consumer.handle_message(
+                 message_set([kafka_message()]),
+                 state(requeue_routing_key: :orders_retry)
+               )
 
       assert_receive {:consumed, %Message{}, _opts}
       assert_receive {:posted, %Message{payload: "payload"}, :orders_retry}
@@ -187,7 +207,7 @@ defmodule Ming.Gateway.Brod.ConsumerTest do
 
       assert {:ok, :ack, _state} =
                Consumer.handle_message(
-                 kafka_message(),
+                 message_set([kafka_message()]),
                  state(dead_letter_queue_routing_key: :orders_dlq)
                )
 
@@ -204,7 +224,8 @@ defmodule Ming.Gateway.Brod.ConsumerTest do
 
       log =
         capture_log([level: :error], fn ->
-          assert {:ok, :ack, _state} = Consumer.handle_message(kafka_message(), state())
+          assert {:ok, :ack, _state} =
+                   Consumer.handle_message(message_set([kafka_message()]), state())
         end)
 
       assert log =~ "rejected message and no dead letter queue configured"
@@ -217,7 +238,7 @@ defmodule Ming.Gateway.Brod.ConsumerTest do
 
       assert {:ok, :ack, _state} =
                Consumer.handle_message(
-                 kafka_message(),
+                 message_set([kafka_message()]),
                  state(invalid_message_routing_key: :orders_invalid)
                )
 
@@ -232,7 +253,7 @@ defmodule Ming.Gateway.Brod.ConsumerTest do
 
       assert {:ok, :ack, _state} =
                Consumer.handle_message(
-                 kafka_message(),
+                 message_set([kafka_message()]),
                  state(invalid_message_routing_key: :orders_invalid)
                )
 
@@ -245,7 +266,7 @@ defmodule Ming.Gateway.Brod.ConsumerTest do
 
       assert {:ok, :ack, _state} =
                Consumer.handle_message(
-                 kafka_message(),
+                 message_set([kafka_message()]),
                  state(dead_letter_queue_routing_key: :orders_dlq)
                )
 
@@ -258,7 +279,8 @@ defmodule Ming.Gateway.Brod.ConsumerTest do
 
       log =
         capture_log([level: :error], fn ->
-          assert {:ok, :ack, _state} = Consumer.handle_message(kafka_message(), state())
+          assert {:ok, :ack, _state} =
+                   Consumer.handle_message(message_set([kafka_message()]), state())
         end)
 
       assert log =~ "unacceptable"
@@ -269,7 +291,9 @@ defmodule Ming.Gateway.Brod.ConsumerTest do
     test "acks when the processor fails" do
       Application.put_env(:ming, :brod_test_response, {:error, :boom})
 
-      assert {:ok, :ack, _state} = Consumer.handle_message(kafka_message(), state())
+      assert {:ok, :ack, _state} =
+               Consumer.handle_message(message_set([kafka_message()]), state())
+
       assert_receive {:consumed, %Message{}, _opts}
     end
   end

@@ -6,8 +6,10 @@ defmodule Ming.Gateway.Brod.Consumer do
   Incoming messages are parsed into `%Ming.Message{}` structs with
   CloudEvents (`ce_` prefixed headers) and W3C trace context support.
 
-  The subscriber is configured with `message_type: :message`, so
-  `handle_message/2` receives one `kafka_message` record at a time.
+  The subscriber is configured with `message_type: :message_set`, so
+  `handle_message/2` receives a `kafka_message_set` record per fetch;
+  each `kafka_message` in the set is processed individually and the set
+  is acked as a whole once every message has been handled.
 
   Handler results map to offsets: `:ack` commits. `:reject` commits after
   forwarding the message to the publication named by the subscription's
@@ -34,6 +36,11 @@ defmodule Ming.Gateway.Brod.Consumer do
     Record.extract(:kafka_message, from_lib: "kafka_protocol/include/kpro_public.hrl")
   )
 
+  Record.defrecordp(
+    :kafka_message_set,
+    Record.extract(:kafka_message_set, from_lib: "brod/include/brod.hrl")
+  )
+
   require Logger
 
   @impl :brod_group_subscriber_v2
@@ -54,7 +61,15 @@ defmodule Ming.Gateway.Brod.Consumer do
   end
 
   @impl :brod_group_subscriber_v2
-  def handle_message(kafka_message() = record, state) do
+  def handle_message(kafka_message_set() = set, state) do
+    set
+    |> kafka_message_set(:messages)
+    |> Enum.each(&handle_record(&1, state))
+
+    {:ok, :ack, state}
+  end
+
+  defp handle_record(kafka_message() = record, state) do
     command_processor = state.command_processor
     message = to_message(record, state)
 
@@ -67,7 +82,7 @@ defmodule Ming.Gateway.Brod.Consumer do
 
     case result do
       {:ok, :ack} ->
-        {:ok, :ack, state}
+        :ok
 
       {:ok, {:reject, :unaccepted}} ->
         handle_unaccepted(message, state)
@@ -77,15 +92,12 @@ defmodule Ming.Gateway.Brod.Consumer do
 
       {:ok, :reject} ->
         forward_dead_letter(message, state)
-        {:ok, :ack, state}
 
       {:ok, {:reject, _reason}} ->
         forward_dead_letter(message, state)
-        {:ok, :ack, state}
 
       {:reject, _reason} ->
         forward_dead_letter(message, state)
-        {:ok, :ack, state}
 
       {:ok, :requeue} ->
         # Kafka has no requeue; republish to the configured requeue
@@ -102,10 +114,8 @@ defmodule Ming.Gateway.Brod.Consumer do
           )
         end
 
-        {:ok, :ack, state}
-
       {:error, _reason} ->
-        {:ok, :ack, state}
+        :ok
     end
   end
 
@@ -127,7 +137,7 @@ defmodule Ming.Gateway.Brod.Consumer do
       )
     end
 
-    {:ok, :ack, state}
+    :ok
   end
 
   # Kafka has no reject; forwards to the dead letter queue when
@@ -146,7 +156,7 @@ defmodule Ming.Gateway.Brod.Consumer do
     end
   end
 
-  defp enrich_headers(message, state) do
+  defp enrich_headers(%Message{} = message, state) do
     headers =
       message.headers
       |> Map.put("ORIGINAL_TIMESTAMP", message.timestamp)

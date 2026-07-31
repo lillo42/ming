@@ -124,7 +124,7 @@ defmodule Ming.Gateway.Brod do
       group_id: Keyword.get(subscription, :group_id, to_string(name)),
       topics: [topic],
       cb_module: Consumer,
-      message_type: :message,
+      message_type: :message_set,
       init_data: init_data,
       consumer_config: Keyword.get(subscription, :consumer_config, []),
       group_config: Keyword.get(subscription, :group_config, [])

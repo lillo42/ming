@@ -162,7 +162,7 @@ Notes:
   - `:invalid_message_routing_key` — routing key of a publication an unacceptable message (one that fails to decode) is forwarded to; falls back to `:dead_letter_queue_routing_key` when not configured.
 - Topic provisioning supports `:assume` (default), `:validate`, `:create`, and `{:create, opts}` where `opts` accepts `:num_partitions`, `:replication_factor`, and `:configs`.
 
-Messages are published with CloudEvents attributes as `ce_`-prefixed Kafka headers and consumed back into `%Ming.Message{}` structs. Consumed messages are processed one at a time (`message_type: :message`) and acked per offset.
+Messages are published with CloudEvents attributes as `ce_`-prefixed Kafka headers and consumed back into `%Ming.Message{}` structs. Consumed messages are delivered in batches (`message_type: :message_set`); each message in the batch is processed individually and the batch offset is committed once every message has been handled.
 
 Handler results map to offsets as follows: `:ack` commits. `:reject` commits after forwarding the message to the publication named by the subscription's `:dead_letter_queue_routing_key` option, when configured (Kafka has no reject; the forwarded message carries `ORIGINAL_TIMESTAMP`, `ORIGINAL_TOPIC`, and `ORIGINAL_TYPE` headers). `:requeue` commits after republishing the message to the publication named by the subscription's `:requeue_routing_key` option, when configured (Kafka has no requeue) — without one, an error is logged (`"Kafka does not support requeue; the message was acked and will not be redelivered"`) and the message is acked.
 
@@ -263,4 +263,5 @@ Complete runnable applications demonstrating the gateways end to end live in
 the `samples/` directory:
 
 - `samples/kafka_sample` — publish and consume through Apache Kafka
+- `samples/kafka_ex_sample` — kafka_ex gateway with dead letter and invalid message topics
 - `samples/rabbitmq_sample` — publish and consume through RabbitMQ (AMQP)

@@ -309,6 +309,7 @@ end
 Complete runnable applications demonstrating the messaging gateways end to end:
 
 - [`samples/kafka_sample`](samples/kafka_sample) — publish and consume through Apache Kafka
+- [`samples/kafka_ex_sample`](samples/kafka_ex_sample) — kafka_ex gateway with dead letter and invalid message topics
 - [`samples/rabbitmq_sample`](samples/rabbitmq_sample) — publish and consume through RabbitMQ (AMQP)
 
 ## Middleware Pipeline
