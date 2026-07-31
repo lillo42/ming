@@ -18,9 +18,6 @@ defmodule Ming.Message.Middleware.DecodeMessageToRequest do
   Decodes the current `%Ming.Message{}` request into a domain request via
   the configured mapper and stores the original message in assigns.
 
-  Decodes the current `%Ming.Message{}` request into a domain request via
-  the configured mapper and stores the original message in assigns.
-
   Halts with `{:reject, :unaccepted}` when the mapper fails to decode the
   message (an error reply or a raised exception), marking it as an
   unacceptable message.
@@ -51,14 +48,6 @@ defmodule Ming.Message.Middleware.DecodeMessageToRequest do
     end
   end
 
-  defp unaccepted(context, reason) do
-    Logger.error("unacceptable message, failed to decode payload: #{inspect(reason)}")
-
-    context
-    |> Context.halt()
-    |> Context.respond({:reject, :unaccepted})
-  end
-
   def before_handle(%Context{} = context) do
     mapper =
       context.assigns[:mapper] ||
@@ -66,6 +55,14 @@ defmodule Ming.Message.Middleware.DecodeMessageToRequest do
         Ming.Message.Mapper.Json
 
     before_handle(%Context{context | assigns: Map.put(context.assigns, :mapper, mapper)})
+  end
+
+  defp unaccepted(context, reason) do
+    Logger.error("unacceptable message, failed to decode payload: #{inspect(reason)}")
+
+    context
+    |> Context.halt()
+    |> Context.respond({:reject, :unaccepted})
   end
 
   @doc """
