@@ -33,13 +33,11 @@ defmodule MyApp.UserRouter do
   use Ming.Router
 
   middleware MyApp.LoggingMiddleware
-  middleware {MyApp.AuthMiddleware, role: :admin}
+  middleware MyApp.AuthMiddleware
 
   register MyApp.CreateUser, handler: MyApp.UserHandler
 end
 ```
-
-Options can be passed as a tuple. They are stored in the context and can be retrieved with `Context.get_opts/1`.
 
 ## Modifying the context
 
