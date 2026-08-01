@@ -17,9 +17,12 @@ defmodule Ming.Gateway.Brod.Consumer do
   reject). `:requeue` commits after republishing to the publication named
   by the subscription's `:requeue_routing_key` option when configured
   (Kafka has no requeue) — without one, an error is logged and the message
-  is simply acked. `{:reject, :unaccepted}` (also produced when a message
-  fails to decode) commits after forwarding to the publication named by
-  `:invalid_message_routing_key`, falling back to
+  is simply acked. Each requeue increments the `x-ming-requeue-count`
+  header; once the count reaches the subscription's `:requeue_count`
+  option (when configured), the message is forwarded to the dead letter
+  queue instead of looping forever. `{:reject, :unaccepted}` (also produced
+  when a message fails to decode) commits after forwarding to the
+  publication named by `:invalid_message_routing_key`, falling back to
   `:dead_letter_queue_routing_key`.
   """
 
@@ -55,6 +58,7 @@ defmodule Ming.Gateway.Brod.Consumer do
        command_processor: Keyword.fetch!(cb_config, :command_processor),
        timeout: Keyword.get(cb_config, :timeout, :infinity),
        requeue_routing_key: Keyword.get(cb_config, :requeue_routing_key),
+       requeue_count: Keyword.get(cb_config, :requeue_count),
        dead_letter_queue_routing_key: Keyword.get(cb_config, :dead_letter_queue_routing_key),
        invalid_message_routing_key: Keyword.get(cb_config, :invalid_message_routing_key)
      }}
@@ -103,7 +107,7 @@ defmodule Ming.Gateway.Brod.Consumer do
         # Kafka has no requeue; republish to the configured requeue
         # topic when present, otherwise log and ack
         if requeue = state.requeue_routing_key do
-          command_processor.post(message, requeue)
+          requeue_message(message, state, requeue)
         else
           Logger.error(
             "Kafka does not support requeue; the message was acked and will not be redelivered",
@@ -116,6 +120,20 @@ defmodule Ming.Gateway.Brod.Consumer do
 
       {:error, _reason} ->
         :ok
+    end
+  end
+
+  # Republishes the message to the requeue topic with an incremented
+  # requeue counter; once the subscription's :requeue_count limit is
+  # reached the message is dead-lettered instead of looping forever
+  defp requeue_message(message, state, requeue) do
+    count = Message.requeue_count(message)
+    max_requeues = state.requeue_count
+
+    if is_integer(max_requeues) and count >= max_requeues do
+      forward_dead_letter(message, state)
+    else
+      state.command_processor.post(Message.put_requeue_count(message, count + 1), requeue)
     end
   end
 

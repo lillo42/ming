@@ -62,7 +62,7 @@ defmodule Ming.Gateway.BrodTest do
       assert sub2 in ids
     end
 
-    test "starts one subscriber per performer when :number_of_performer is set" do
+    test "starts one subscriber per performer when :number_of_performers is set" do
       name = unique_name(:brod_gateway)
       sub = unique_name(:sub)
 
@@ -71,7 +71,7 @@ defmodule Ming.Gateway.BrodTest do
         command_processor: TestBrodProcessor,
         connection: [endpoints: brod_endpoints()],
         subscriptions: [
-          [name: sub, topic_or_queue: "topic1", routing_key: :rk1, number_of_performer: 3]
+          [name: sub, topic_or_queue: "topic1", routing_key: :rk1, number_of_performers: 3]
         ]
       ]
 
@@ -85,17 +85,17 @@ defmodule Ming.Gateway.BrodTest do
       assert {sub, 3} in ids
     end
 
-    test "raises when :number_of_performer is not a positive integer" do
+    test "raises when :number_of_performers is not a positive integer" do
       opts = [
         name: unique_name(:brod_gateway),
         command_processor: TestBrodProcessor,
         connection: [endpoints: brod_endpoints()],
         subscriptions: [
-          [name: :sub1, topic_or_queue: "topic1", routing_key: :rk1, number_of_performer: 0]
+          [name: :sub1, topic_or_queue: "topic1", routing_key: :rk1, number_of_performers: 0]
         ]
       ]
 
-      assert_raise ArgumentError, ~r/:number_of_performer must be a positive integer/, fn ->
+      assert_raise ArgumentError, ~r/:number_of_performers must be a positive integer/, fn ->
         Brod.init(opts)
       end
     end

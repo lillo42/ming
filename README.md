@@ -1,12 +1,12 @@
 # Ming
 
-Ming is a lightweight, `Plug`-inspired pipeline framework for routing Commands, Queries, and Events in Elixir.
+Ming is a lightweight, `Plug`-inspired pipeline framework for routing Commands and Events in Elixir.
 
 While initially inspired by C# frameworks like Brighter, Ming has been completely rewritten to embrace Elixir's functional nature, relying on highly optimized compile-time routing and simple data transformations via `%Ming.Context{}`.
 
 Provides support for:
 
-- Command, Event, and Query registration and dispatch
+- Command and Event registration and dispatch
 - Unified Router architecture mapping payloads to handlers
 - Aggregate dispatching via Command Processor
 - A flexible, context-driven Middleware pipeline (similar to Plug)
@@ -60,7 +60,7 @@ defmodule MyApp.UserRouter do
 
   # Middleware runs in the order defined
   middleware MyApp.LoggingMiddleware
-  middleware {MyApp.AuthMiddleware, role: :admin}
+  middleware MyApp.AuthMiddleware
 
   register CreateUser, handler: UserHandler
 end
@@ -92,9 +92,6 @@ end
 
 # Publish executes all registered handlers
 MyApp.EventRouter.publish(UserCreated, %UserCreated{id: 123})
-
-# Publish in parallel executes all registered handlers concurrently
-MyApp.EventRouter.publish(UserCreated, %UserCreated{id: 123}, dispatch_strategy: :parallel)
 ```
 
 ### 4. Aggregating Routers with CommandProcessor
@@ -352,7 +349,7 @@ All events include metadata such as `routing_key`, `handler`, `request_id`, and 
 ### Structured Logging
 
 If an execution timeout occurs or a pipeline crashes, Ming automatically logs the error via `Logger` using standard keyword list metadata:
-`[ming_routing_key: ..., ming_handler: ..., ming_request_id: ..., crash_reason: ...]`
+`[routing_key: ..., handler: ..., request_id: ..., crash_reason: ...]`
 
 ## Used in production?
 

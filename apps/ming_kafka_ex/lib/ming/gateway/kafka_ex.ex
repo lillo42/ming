@@ -34,11 +34,16 @@ defmodule Ming.Gateway.KafkaEx do
   - `:topic_or_queue` (required) — Kafka topic to consume from.
   - `:routing_key` (required) — Ming routing key set on consumed messages.
   - `:group_id` — Kafka consumer group id, defaults to the subscription name.
-  - `:number_of_performer` — how many consumer groups are started for the
+  - `:number_of_performers` — how many consumer groups are started for the
     subscription, defaults to `1`. Each one joins `:group_id` as an
     independent consumer group member, so the topic's partitions are split
-    between them. Members beyond the partition count stay idle; raise
-    `:num_partitions` (see below) to scale parallelism further.
+    between them. Members beyond the partition count stay idle; to scale
+    parallelism further, scale the topic's partitions. Prefer doing that at
+    provision time (`:num_partitions`, see below): raising the partition
+    count of a live topic is irreversible and breaks per-key ordering
+    (`hash(partition_key) % num_partitions` changes), so for production
+    topics with keyed messages it is safer to create a new topic with the
+    desired partition count and migrate traffic to it.
   - `:processing_timeout` — timeout passed to the command processor,
     defaults to `:infinity`.
   - `:consumer_config` — extra `KafkaEx.Consumer.GenConsumer` options
@@ -48,6 +53,10 @@ defmodule Ming.Gateway.KafkaEx do
     (e.g. `:heartbeat_interval`, `:session_timeout`), defaults to `[]`.
   - `:requeue_routing_key` — routing key of a publication the message is
     republished to when the handler requeues it (Kafka has no native requeue).
+  - `:requeue_count` — maximum number of times a message may be requeued
+    before it is forwarded to the dead letter queue instead, defaults to
+    `nil` (no limit). The count travels with the message in the
+    `x-ming-requeue-count` header.
   - `:dead_letter_queue_routing_key` — routing key of a publication the
     message is forwarded to when the handler rejects it (Kafka has no
     native reject).
@@ -131,6 +140,7 @@ defmodule Ming.Gateway.KafkaEx do
       command_processor: command_processor,
       timeout: Keyword.get(subscription, :processing_timeout, :infinity),
       requeue_routing_key: Keyword.get(subscription, :requeue_routing_key),
+      requeue_count: Keyword.get(subscription, :requeue_count),
       dead_letter_queue_routing_key: Keyword.get(subscription, :dead_letter_queue_routing_key),
       invalid_message_routing_key: Keyword.get(subscription, :invalid_message_routing_key)
     }
@@ -156,13 +166,13 @@ defmodule Ming.Gateway.KafkaEx do
   end
 
   defp number_of_performers(subscription) do
-    case Keyword.get(subscription, :number_of_performer, 1) do
+    case Keyword.get(subscription, :number_of_performers, 1) do
       performers when is_integer(performers) and performers >= 1 ->
         performers
 
       other ->
         raise ArgumentError,
-              ":number_of_performer must be a positive integer, got: #{inspect(other)}"
+              ":number_of_performers must be a positive integer, got: #{inspect(other)}"
     end
   end
 

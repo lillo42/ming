@@ -30,6 +30,7 @@ defmodule Ming.Gateway.KafkaEx.ConsumerTest do
       command_processor: TestKafkaExProcessor,
       timeout: :infinity,
       requeue_routing_key: nil,
+      requeue_count: nil,
       dead_letter_queue_routing_key: nil,
       invalid_message_routing_key: nil
     }
@@ -198,6 +199,38 @@ defmodule Ming.Gateway.KafkaEx.ConsumerTest do
 
       assert_receive {:consumed, %Message{}, _opts}
       assert_receive {:posted, %Message{payload: "payload"}, :orders_retry}
+    end
+
+    test "requeues with an incremented requeue counter header" do
+      Application.put_env(:ming, :kafka_ex_test_response, {:ok, :requeue})
+
+      assert {:async_commit, _state} =
+               Consumer.handle_message_set(
+                 [kafka_record()],
+                 state(requeue_routing_key: :orders_retry, requeue_count: 3)
+               )
+
+      assert_receive {:posted, %Message{} = message, :orders_retry}
+      assert message.headers["x-ming-requeue-count"] == 1
+    end
+
+    test "forwards to the dead letter queue when the requeue count is reached" do
+      Application.put_env(:ming, :kafka_ex_test_response, {:ok, :requeue})
+
+      record = kafka_record(headers: [Header.new("x-ming-requeue-count", "3")])
+
+      assert {:async_commit, _state} =
+               Consumer.handle_message_set(
+                 [record],
+                 state(
+                   requeue_routing_key: :orders_retry,
+                   requeue_count: 3,
+                   dead_letter_queue_routing_key: :orders_dlq
+                 )
+               )
+
+      assert_receive {:posted, %Message{}, :orders_dlq}
+      refute_receive {:posted, _, :orders_retry}
     end
 
     test "forwards rejected messages to the dead letter queue and commits" do

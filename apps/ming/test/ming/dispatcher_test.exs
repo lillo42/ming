@@ -39,6 +39,53 @@ defmodule Ming.DispatcherTest do
     end
   end
 
+  defmodule FlakyHandler do
+    @moduledoc """
+    Returns `{:error, :failed}` until the attempt counter held by the
+    `:counter` agent passes `:succeed_after`, then returns `:ok`.
+    """
+
+    def handle(%{counter: counter, succeed_after: succeed_after}, _ctx) do
+      attempt = Agent.get_and_update(counter, fn n -> {n + 1, n + 1} end)
+
+      if attempt > succeed_after do
+        :ok
+      else
+        {:error, :failed}
+      end
+    end
+  end
+
+  defmodule FlakyRaiseHandler do
+    @moduledoc """
+    Raises until the attempt counter held by the `:counter` agent passes
+    `:succeed_after`, then returns `:ok`.
+    """
+
+    def handle(%{counter: counter, succeed_after: succeed_after}, _ctx) do
+      attempt = Agent.get_and_update(counter, fn n -> {n + 1, n + 1} end)
+
+      if attempt > succeed_after do
+        :ok
+      else
+        raise "boom"
+      end
+    end
+  end
+
+  defmodule SlowFlakyHandler do
+    @moduledoc """
+    Sleeps for `:delay` on every attempt, counting attempts in the
+    `:counter` agent.
+    """
+
+    def handle(%{counter: counter, delay: delay}, _ctx) do
+      Agent.update(counter, &(&1 + 1))
+      Process.sleep(delay)
+      :ok
+    end
+  end
+
   setup do
     context = %Context{
       assigns: %{},
@@ -104,6 +151,93 @@ defmodule Ming.DispatcherTest do
       result = Dispatcher.dispatch(context)
       assert Context.response(result) == {:error, :timeout}
       assert Context.halted?(result)
+    end
+  end
+
+  describe "dispatch/1 with retry" do
+    setup %{context: context} do
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      context = %{
+        context
+        | handler: FlakyHandler,
+          retry: [max_retries: 5, base_delay: 1, backoff_type: :fixed]
+      }
+
+      {:ok, context: context, counter: counter}
+    end
+
+    test "retries failed attempts until success", %{context: context, counter: counter} do
+      context = %{context | request: %{counter: counter, succeed_after: 2}}
+
+      result = Dispatcher.dispatch(context)
+
+      assert Context.response(result) == :ok
+      assert Agent.get(counter, & &1) == 3
+    end
+
+    test "returns the last error when retries are exhausted",
+         %{context: context, counter: counter} do
+      context = %{
+        context
+        | request: %{counter: counter, succeed_after: 99},
+          retry: [max_retries: 2, base_delay: 1, backoff_type: :fixed]
+      }
+
+      result = Dispatcher.dispatch(context)
+
+      assert Context.response(result) == {:error, :failed}
+      assert Agent.get(counter, & &1) == 3
+    end
+
+    test "does not retry on success", %{context: context, counter: counter} do
+      context = %{context | request: %{counter: counter, succeed_after: 0}}
+
+      result = Dispatcher.dispatch(context)
+
+      assert Context.response(result) == :ok
+      assert Agent.get(counter, & &1) == 1
+    end
+
+    test "retries handler exceptions", %{context: context, counter: counter} do
+      context = %{
+        context
+        | handler: FlakyRaiseHandler,
+          request: %{counter: counter, succeed_after: 1}
+      }
+
+      result = Dispatcher.dispatch(context)
+
+      assert Context.response(result) == :ok
+      assert Agent.get(counter, & &1) == 2
+    end
+
+    test "accepts a plain integer as the retry limit", %{context: context, counter: counter} do
+      context = %{
+        context
+        | request: %{counter: counter, succeed_after: 1},
+          retry: 1
+      }
+
+      result = Dispatcher.dispatch(context)
+
+      assert Context.response(result) == :ok
+      assert Agent.get(counter, & &1) == 2
+    end
+
+    test "applies a numeric timeout per attempt", %{context: context, counter: counter} do
+      context = %{
+        context
+        | handler: SlowFlakyHandler,
+          request: %{counter: counter, delay: 100},
+          timeout: 30,
+          retry: [max_retries: 1, base_delay: 1, backoff_type: :fixed]
+      }
+
+      result = Dispatcher.dispatch(context)
+
+      assert Context.response(result) == {:error, :timeout}
+      assert Agent.get(counter, & &1) == 2
     end
   end
 end

@@ -52,7 +52,7 @@ defmodule MingAmqp.MixProject do
   defp package do
     [
       maintainers: ["Rafael Andrade"],
-      licenses: ["GPL-3.0"],
+      licenses: ["LGPL-3.0-only"],
       links: %{"GitHub" => @source_url},
       files: ~w(mix.exs lib)
     ]

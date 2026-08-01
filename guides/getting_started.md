@@ -53,7 +53,7 @@ defmodule MyApp.UserRouter do
   use Ming.Router
 
   middleware MyApp.LoggingMiddleware
-  middleware {MyApp.AuthMiddleware, role: :admin}
+  middleware MyApp.AuthMiddleware
 
   register MyApp.CreateUser, handler: MyApp.UserHandler
 end
@@ -73,6 +73,24 @@ For events, use `publish/3` to execute all handlers registered for the same stru
 ```elixir
 MyApp.EventRouter.publish(MyApp.UserCreated, %MyApp.UserCreated{id: 123})
 ```
+
+## Retrying failed requests
+
+Registrations accept a `:retry` option. When the pipeline returns `{:error, _}` — including handler exceptions and timeouts — the whole pipeline is re-run with a backoff delay until it succeeds or the retries are exhausted:
+
+```elixir
+register MyApp.CreateUser,
+  handler: MyApp.UserHandler,
+  retry: [max_retries: 3, base_delay: 1_000, backoff_type: :rand_exp]
+```
+
+The option is a keyword list of `Ming.retry_opts()` (`:max_retries`, `:base_delay`, `:max_delay`, `:backoff_type` — one of `:rand_exp`, `:exp`, `:linear` or `:fixed`) or a plain integer meaning "retry up to N times with default backoff". A per-call `retry:` option overrides the registered one:
+
+```elixir
+MyApp.UserRouter.send(MyApp.CreateUser, command, retry: 0) # disable retries for this call
+```
+
+Each attempt runs the full middleware chain, emits its own `[:ming, :dispatch]` telemetry span, and a numeric `:timeout` applies per attempt.
 
 ## Next steps
 

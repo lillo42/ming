@@ -29,6 +29,7 @@ defmodule Ming do
           {:id, id()}
           | {:correlation_id, id()}
           | {:metadata, map()}
+          | {:retry, non_neg_integer() | keyword(retry_opts()) | nil}
           | {:timeout, :infinity | non_neg_integer()}
           | {:routing_key, routing_key()}
 
@@ -84,7 +85,6 @@ defmodule Ming do
           | {:processing_timeout, timeout()}
           | {:provision, provision()}
           | {:requeue_count, non_neg_integer() | nil}
-          | {:requeue_delay, timeout()}
           | {:routing_key, routing_key()}
           | {:queue_or_topic, String.t() | atom() | URI.t()}
           | {:timeout, timeout()}

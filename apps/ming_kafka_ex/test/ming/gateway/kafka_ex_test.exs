@@ -56,7 +56,7 @@ defmodule Ming.Gateway.KafkaExTest do
       assert sub2 in ids
     end
 
-    test "starts one consumer group per performer when :number_of_performer is set" do
+    test "starts one consumer group per performer when :number_of_performers is set" do
       name = unique_name(:kafka_ex_gateway)
       sub = unique_name(:sub)
 
@@ -65,7 +65,7 @@ defmodule Ming.Gateway.KafkaExTest do
         command_processor: TestKafkaExProcessor,
         connection: [endpoints: kafka_ex_endpoints()],
         subscriptions: [
-          [name: sub, topic_or_queue: "topic1", routing_key: :rk1, number_of_performer: 3]
+          [name: sub, topic_or_queue: "topic1", routing_key: :rk1, number_of_performers: 3]
         ]
       ]
 
@@ -79,17 +79,17 @@ defmodule Ming.Gateway.KafkaExTest do
       assert {sub, 3} in ids
     end
 
-    test "raises when :number_of_performer is not a positive integer" do
+    test "raises when :number_of_performers is not a positive integer" do
       opts = [
         name: unique_name(:kafka_ex_gateway),
         command_processor: TestKafkaExProcessor,
         connection: [endpoints: kafka_ex_endpoints()],
         subscriptions: [
-          [name: :sub1, topic_or_queue: "topic1", routing_key: :rk1, number_of_performer: 0]
+          [name: :sub1, topic_or_queue: "topic1", routing_key: :rk1, number_of_performers: 0]
         ]
       ]
 
-      assert_raise ArgumentError, ~r/:number_of_performer must be a positive integer/, fn ->
+      assert_raise ArgumentError, ~r/:number_of_performers must be a positive integer/, fn ->
         KafkaEx.init(opts)
       end
     end
