@@ -5,6 +5,16 @@ defmodule Ming.Dispatcher do
   When a numeric timeout is configured, dispatch runs in a task and is bounded
   by that timeout. Otherwise it runs in-process.
 
+  ## Retries
+
+  When the context carries a `:retry` option — a keyword list of
+  `Ming.retry_opts()` or a plain max-retries integer — any `{:error, _}`
+  response (including handler exceptions and timeouts) re-runs the whole
+  pipeline with a backoff delay computed by `Ming.Gateway.RetryConfig`,
+  until it succeeds or the retries are exhausted. Each attempt runs the
+  full middleware chain, emits its own telemetry span, and a numeric
+  timeout applies per attempt.
+
   ## Telemetry
 
   The dispatcher emits the following telemetry events using `:telemetry.span/3`:
@@ -25,11 +35,47 @@ defmodule Ming.Dispatcher do
   require Logger
 
   alias Ming.Context
+  alias Ming.Gateway.RetryConfig
 
   @doc """
   Dispatches a context through the middleware pipeline.
   """
-  def dispatch(%Context{timeout: timeout} = context) when is_number(timeout) and timeout > 0 do
+  def dispatch(%Context{} = context) do
+    do_dispatch(context, retry_config(context.retry), 0)
+  end
+
+  defp do_dispatch(%Context{} = context, nil, _attempt), do: run(context)
+
+  defp do_dispatch(%Context{} = context, %RetryConfig{} = config, attempt) do
+    result = run(context)
+
+    case {Context.response(result), attempt < config.max_retries} do
+      {{:error, _reason}, true} ->
+        delay = RetryConfig.calculate_delay(config, attempt)
+
+        Logger.warning(
+          "retrying request (attempt #{attempt + 1}/#{config.max_retries})",
+          Keyword.merge(log_metadata(context), attempt: attempt + 1, retry_delay: delay)
+        )
+
+        Process.sleep(delay)
+
+        do_dispatch(context, config, attempt + 1)
+
+      _response ->
+        result
+    end
+  end
+
+  defp retry_config(nil), do: nil
+  defp retry_config(false), do: nil
+
+  defp retry_config(max_retries) when is_integer(max_retries) and max_retries >= 0,
+    do: RetryConfig.new(max_retries: max_retries)
+
+  defp retry_config(opts) when is_list(opts), do: RetryConfig.new(opts)
+
+  defp run(%Context{timeout: timeout} = context) when is_number(timeout) and timeout > 0 do
     log_meta = log_metadata(context)
 
     task = Task.async(fn -> do_dispatcher(context) end)
@@ -60,7 +106,7 @@ defmodule Ming.Dispatcher do
     end
   end
 
-  def dispatch(%Context{} = context) do
+  defp run(%Context{} = context) do
     log_meta = log_metadata(context)
 
     try do

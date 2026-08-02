@@ -15,12 +15,34 @@ defmodule Ming.RouterTest do
     def handle(%{payload: _}, _context), do: :ok
   end
 
+  defmodule FlakyHandler do
+    @moduledoc """
+    Fails twice before returning `:ok`, counting attempts in the agent
+    carried by the command value.
+    """
+
+    def handle(%MyCommand{value: counter}, _context) when is_pid(counter) do
+      attempt = Agent.get_and_update(counter, fn n -> {n + 1, n + 1} end)
+
+      if attempt > 2 do
+        :ok
+      else
+        {:error, :failed}
+      end
+    end
+  end
+
   defmodule MyRouter do
     use Ming.Router
 
     register(MyCommand, handler: MyHandler)
     register(MyEvent, handler: MyHandler)
     register(:my_atom_key, handler: MyHandler)
+
+    register(:retry_key,
+      handler: FlakyHandler,
+      retry: [max_retries: 3, base_delay: 1, backoff_type: :fixed]
+    )
   end
 
   describe "send/3" do
@@ -34,6 +56,22 @@ defmodule Ming.RouterTest do
 
     test "returns unregistered for unknown routing key" do
       assert MyRouter.send(UnknownKey, %MyCommand{value: 1}) == {:error, :unregistered_command}
+    end
+
+    test "retries the handler according to the registered retry option" do
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      assert MyRouter.send(:retry_key, %MyCommand{value: counter}) == :ok
+      assert Agent.get(counter, & &1) == 3
+    end
+
+    test "a per-call retry option overrides the registered one" do
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      assert MyRouter.send(:retry_key, %MyCommand{value: counter}, retry: 0) ==
+               {:error, :failed}
+
+      assert Agent.get(counter, & &1) == 1
     end
   end
 

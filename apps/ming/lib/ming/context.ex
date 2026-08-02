@@ -17,6 +17,7 @@ defmodule Ming.Context do
     :metadata,
     :request,
     :response,
+    :retry,
     :routing_key,
     :timeout,
     :timestamp,

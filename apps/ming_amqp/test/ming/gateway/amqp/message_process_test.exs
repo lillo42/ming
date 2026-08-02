@@ -181,6 +181,77 @@ defmodule Ming.Gateway.AMQP.MessageProcessTest do
       assert {:ok, "requeue me", _meta} = Basic.get(chan, to_string(queue))
     end
 
+    test ":requeue republishes with an incremented counter when :requeue_count is set",
+         %{amqp_chan: chan, exchange: exchange, pool_name: pool_name} = context do
+      {queue, routing_key} = setup_queue(context)
+      queue_str = to_string(queue)
+
+      :ok = Basic.publish(chan, to_string(exchange), to_string(routing_key), "requeue me")
+      Process.sleep(100)
+      assert {:ok, "requeue me", meta} = Basic.get(chan, queue_str)
+
+      message = %Message{
+        id: "requeue-count-msg",
+        payload: "requeue me",
+        routing_key: routing_key,
+        timestamp: DateTime.utc_now()
+      }
+
+      TestCommandProcessor.set_result(:requeue)
+
+      assert :ok =
+               MessageProcess.process(
+                 pool_name,
+                 chan,
+                 meta.delivery_tag,
+                 routing_key,
+                 message,
+                 :infinity,
+                 queue: queue_str,
+                 requeue_count: 3
+               )
+
+      assert {:ok, "requeue me", republished_meta} = Basic.get(chan, queue_str)
+
+      assert {"x-ming-requeue-count", :long, 1} =
+               Enum.find(republished_meta.headers, fn {key, _type, _val} ->
+                 key == "x-ming-requeue-count"
+               end)
+    end
+
+    test ":requeue rejects the message when the requeue count is reached",
+         %{amqp_chan: chan, exchange: exchange, pool_name: pool_name} = context do
+      {queue, routing_key} = setup_queue(context)
+
+      :ok = Basic.publish(chan, to_string(exchange), to_string(routing_key), "poison")
+      Process.sleep(100)
+      assert {:ok, "poison", meta} = Basic.get(chan, to_string(queue))
+
+      message = %Message{
+        id: "poison-msg",
+        payload: "poison",
+        routing_key: routing_key,
+        timestamp: DateTime.utc_now(),
+        headers: %{"x-ming-requeue-count" => 3}
+      }
+
+      TestCommandProcessor.set_result(:requeue)
+
+      assert :ok =
+               MessageProcess.process(
+                 pool_name,
+                 chan,
+                 meta.delivery_tag,
+                 routing_key,
+                 message,
+                 :infinity,
+                 queue: to_string(queue),
+                 requeue_count: 3
+               )
+
+      assert {:empty, _} = Basic.get(chan, to_string(queue))
+    end
+
     test "{:error, _} rejects message",
          %{amqp_chan: chan, exchange: exchange, pool_name: pool_name} = context do
       {queue, routing_key} = setup_queue(context)

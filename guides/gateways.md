@@ -104,6 +104,12 @@ Notes:
   dead-letters any message that is rejected without requeue (`:reject`,
   `{:reject, reason}`, `{:error, _}`) — including unacceptable messages
   that fail to decode.
+- Bounded requeues: when a subscription sets `:requeue_count`, a requeued
+  message is republished to its own queue with an incremented
+  `x-ming-requeue-count` header and the original delivery is acked; once
+  the count reaches the limit the message is rejected without requeue so
+  the broker dead-letters it instead of requeueing it forever. Without
+  `:requeue_count`, requeues are broker-native and unlimited.
 - A runnable example is available in `samples/rabbitmq_sample`.
 
 ## Kafka gateway
@@ -155,20 +161,22 @@ Notes:
 - Any extra `:connection` keys are passed through to `:brod.start_link_client/3`.
 - Subscription-only options:
   - `:group_id` — Kafka consumer group id, defaults to the subscription name.
+  - `:number_of_performers` — how many group subscribers are started for the subscription, defaults to `1`. Each subscriber joins `:group_id` as an independent consumer group member, so the topic's partitions are split between them; members beyond the partition count stay idle. To scale parallelism further, scale the topic's partitions — preferably at provision time: raising the partition count of a live topic is irreversible and breaks per-key ordering (`hash(partition_key) % num_partitions` changes), so for production topics with keyed messages it is safer to create a new topic with the desired partition count and migrate traffic to it.
   - `:processing_timeout` — timeout passed to the command processor, defaults to `:infinity`.
   - `:consumer_config` and `:group_config` — passed through to `:brod_group_subscriber_v2`.
   - `:requeue_routing_key` — routing key of a publication the message is republished to when the handler requeues it.
+  - `:requeue_count` — maximum number of times a message may be requeued before it is forwarded to `:dead_letter_queue_routing_key` instead, defaults to `nil` (no limit). Each requeue increments the `x-ming-requeue-count` header.
   - `:dead_letter_queue_routing_key` — routing key of a publication the message is forwarded to when the handler rejects it.
   - `:invalid_message_routing_key` — routing key of a publication an unacceptable message (one that fails to decode) is forwarded to; falls back to `:dead_letter_queue_routing_key` when not configured.
 - Topic provisioning supports `:assume` (default), `:validate`, `:create`, and `{:create, opts}` where `opts` accepts `:num_partitions`, `:replication_factor`, and `:configs`.
 
 Messages are published with CloudEvents attributes as `ce_`-prefixed Kafka headers and consumed back into `%Ming.Message{}` structs. Consumed messages are delivered in batches (`message_type: :message_set`); each message in the batch is processed individually and the batch offset is committed once every message has been handled.
 
-Handler results map to offsets as follows: `:ack` commits. `:reject` commits after forwarding the message to the publication named by the subscription's `:dead_letter_queue_routing_key` option, when configured (Kafka has no reject; the forwarded message carries `ORIGINAL_TIMESTAMP`, `ORIGINAL_TOPIC`, and `ORIGINAL_TYPE` headers). `:requeue` commits after republishing the message to the publication named by the subscription's `:requeue_routing_key` option, when configured (Kafka has no requeue) — without one, an error is logged (`"Kafka does not support requeue; the message was acked and will not be redelivered"`) and the message is acked.
+Handler results map to offsets as follows: `:ack` commits. `:reject` commits after forwarding the message to the publication named by the subscription's `:dead_letter_queue_routing_key` option, when configured (Kafka has no reject; the forwarded message carries `ORIGINAL_TIMESTAMP`, `ORIGINAL_TOPIC`, and `ORIGINAL_TYPE` headers). `:requeue` commits after republishing the message to the publication named by the subscription's `:requeue_routing_key` option, when configured (Kafka has no requeue) — without one, an error is logged (`"Kafka does not support requeue; the message was acked and will not be redelivered"`) and the message is acked. Each requeue increments the `x-ming-requeue-count` header; once the count reaches the subscription's `:requeue_count` option (when configured), the message is forwarded to the dead letter queue instead of looping forever.
 
 ## Kafka gateway (kafka_ex)
 
-`Ming.Gateway.KafkaEx` connects to Apache Kafka via `:kafka_ex`. It manages a single `KafkaEx` client per gateway, one `KafkaEx.Consumer.ConsumerGroup` per subscription, and can provision topics before startup. It accepts the same configuration as `Ming.Gateway.Brod` — only the adapter module and dependency differ.
+`Ming.Gateway.KafkaEx` connects to Apache Kafka via `:kafka_ex`. It manages a single `KafkaEx` client per gateway, one `KafkaEx.Consumer.ConsumerGroup` per subscription (or per performer when `:number_of_performers` is set), and can provision topics before startup. It accepts the same configuration as `Ming.Gateway.Brod` — only the adapter module and dependency differ.
 
 Add `:ming_kafka_ex` to your dependencies:
 
@@ -235,7 +243,7 @@ The value returned by your handler (via the consumed pipeline) is translated int
 - `:ok`, `{:ok, _}`, or `:ack` — acknowledge the message.
 - `:reject` — reject without requeue (AMQP; the broker dead-letters the message when the queue was provisioned with a dead letter exchange) / forward to the subscription's `:dead_letter_queue_routing_key` publication when configured, then commit the offset (Kafka).
 - `{:reject, reason}` — same transport behavior as `:reject`, carrying a reason. `{:reject, :unaccepted}` marks a poison message: it is also the automatic result when a message fails to decode, and on Kafka it is forwarded to the subscription's `:invalid_message_routing_key` publication (falling back to `:dead_letter_queue_routing_key`).
-- `:requeue` — reject with requeue (AMQP) / republish to the subscription's `:requeue_routing_key` publication when configured, then commit the offset; without one, commit and log an error since Kafka has no requeue (Kafka).
+- `:requeue` — reject with requeue (AMQP) / republish to the subscription's `:requeue_routing_key` publication when configured, then commit the offset; without one, commit and log an error since Kafka has no requeue (Kafka). When the subscription sets `:requeue_count`, requeues are bounded: each one increments the `x-ming-requeue-count` header (on AMQP the message is republished to its own queue and the original delivery is acked) and, once the limit is reached, the message is rejected without requeue / forwarded to the dead letter queue instead of looping forever.
 - `{:error, _}` — reject without requeue (AMQP) / commit the offset to skip the message (Kafka).
 - a raised exception — reject with requeue (AMQP) / commit the offset with the same error log as `:requeue` (Kafka).
 

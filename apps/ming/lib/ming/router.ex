@@ -156,6 +156,7 @@ defmodule Ming.Router do
           metadata: metadata,
           middlewares: middleware ++ [Ming.Middleware.CallHandler],
           request: request,
+          retry: Keyword.get(opts, :retry),
           routing_key: routing_key,
           timestamp: DateTime.utc_now(),
           timeout: timeout

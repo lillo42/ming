@@ -47,6 +47,8 @@ defmodule Ming.Gateway.AMQP.Consumer do
            %{
              channel: channel,
              process_pool_name: Keyword.fetch!(args, :process_pool_name),
+             queue: to_string(topic_or_queue),
+             requeue_count: Keyword.get(args, :requeue_count),
              routing_key: routing_key,
              timeout: Keyword.get(args, :processing_timeout, :infinity)
            }}
@@ -91,6 +93,8 @@ defmodule Ming.Gateway.AMQP.Consumer do
         %{
           channel: channel,
           process_pool_name: process_pool_name,
+          queue: queue,
+          requeue_count: requeue_count,
           routing_key: routing_key,
           timeout: timeout
         } = state
@@ -103,7 +107,9 @@ defmodule Ming.Gateway.AMQP.Consumer do
       Map.get(metadata, :delivery_tag),
       routing_key,
       message,
-      timeout
+      timeout,
+      queue: queue,
+      requeue_count: requeue_count
     )
 
     {:noreply, state}

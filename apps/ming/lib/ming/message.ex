@@ -69,4 +69,45 @@ defmodule Ming.Message do
     headers: %{},
     spec_version: "1.0"
   ]
+
+  @requeue_count_header "x-ming-requeue-count"
+
+  @doc """
+  Returns the name of the header used to track how many times a message
+  has been requeued (`#{@requeue_count_header}`).
+  """
+  @spec requeue_count_header() :: String.t()
+  def requeue_count_header, do: @requeue_count_header
+
+  @doc """
+  Returns how many times the message has been requeued so far, based on
+  the `#{@requeue_count_header}` header. Defaults to `0` when the header
+  is missing or malformed.
+  """
+  @spec requeue_count(t()) :: non_neg_integer()
+  def requeue_count(%__MODULE__{headers: headers}) do
+    case Map.get(headers, @requeue_count_header) do
+      count when is_integer(count) and count >= 0 ->
+        count
+
+      count when is_binary(count) ->
+        case Integer.parse(count) do
+          {count, _rest} when count >= 0 -> count
+          :error -> 0
+        end
+
+      _other ->
+        0
+    end
+  end
+
+  @doc """
+  Returns a copy of the message with the requeue counter header set to
+  `count`.
+  """
+  @spec put_requeue_count(t(), non_neg_integer()) :: t()
+  def put_requeue_count(%__MODULE__{} = message, count)
+      when is_integer(count) and count >= 0 do
+    %__MODULE__{message | headers: Map.put(message.headers, @requeue_count_header, count)}
+  end
 end
