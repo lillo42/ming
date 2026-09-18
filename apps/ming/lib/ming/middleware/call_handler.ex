@@ -5,48 +5,54 @@ defmodule Ming.Middleware.CallHandler do
   It normalizes handler return values into `Ming.Context.response`.
   """
 
+  require Logger
+
   alias Ming.Context
 
   @behaviour Ming.Middleware
 
-  @doc """
-  Calls the configured handler and maps its result into context response.
-  """
-  def before_handle(
-        %Context{
-          handler: handler,
-          request: request
-        } = context
-      ) do
-    case handler.handle(request, context) do
-      :ok ->
-        Context.respond(context, :ok)
+  @impl Ming.Middleware
+  def execute(
+        %Context{request: request} = context,
+        handler,
+        next
+      )
+      when is_atom(handler) do
+    context =
+      case handler.handle(request, context) do
+        :ok ->
+          Context.respond(context, :ok)
 
-      nil ->
-        Context.respond(context, {:ok, nil})
+        nil ->
+          Context.respond(context, {:ok, nil})
 
-      {:error, reason} ->
-        Context.respond(context, {:error, reason})
+        {:error, reason} ->
+          Context.respond(context, {:error, reason})
 
-      {:ok, resp} ->
-        Context.respond(context, {:ok, resp})
+        {:ok, resp} ->
+          Context.respond(context, {:ok, resp})
 
-      %Context{} = resp ->
-        resp
+        %Context{} = resp ->
+          resp
 
-      resp when is_tuple(resp) and elem(resp, 0) == :error ->
-        Context.respond(context, resp)
+        resp when is_tuple(resp) and elem(resp, 0) == :error ->
+          Context.respond(context, resp)
 
-      resp when is_tuple(resp) and elem(resp, 0) == :ok ->
-        Context.respond(context, resp)
+        resp when is_tuple(resp) and elem(resp, 0) == :ok ->
+          Context.respond(context, resp)
 
-      resp ->
-        Context.respond(context, {:ok, resp})
-    end
+        resp ->
+          Context.respond(context, {:ok, resp})
+      end
+
+    next.(context)
   end
 
-  @doc """
-  No-op after stage for handler invocation middleware.
-  """
-  def after_handle(context), do: context
+  def execute(%Context{metadata: %{handler: handler}} = context, next) do
+    Logger.error("invalid handler: #{handler}")
+
+    next.(context)
+  end
+
+  def execute(context, next), do: next.(context)
 end

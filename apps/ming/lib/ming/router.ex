@@ -1,14 +1,5 @@
 defmodule Ming.Router do
-  @moduledoc """
-  Macro-based router for request registration and dispatch.
-
-  A router maps one or more routing keys to handlers and middleware, then
-  generates `send/3` and `publish/3` functions for runtime execution.
-  """
-
-  @doc """
-  Injects router registration macros and default options.
-  """
+  @doc false
   defmacro __using__(opts) do
     metadata = Keyword.get(opts, :metadata, %{}) |> Macro.escape()
     timeout = Keyword.get(opts, :timeout, :infinity)
@@ -18,8 +9,8 @@ defmodule Ming.Router do
 
       @before_compile unquote(__MODULE__)
 
-      Module.register_attribute(__MODULE__, :registered, accumulate: true)
-      Module.register_attribute(__MODULE__, :registered_middlewares, accumulate: true)
+      Module.register_attribute(__MODULE__, :routing_keys, accumulate: true)
+      Module.register_attribute(__MODULE__, :middlewares, accumulate: true)
 
       @default_opts [
         metadata: unquote(metadata),
@@ -28,142 +19,65 @@ defmodule Ming.Router do
     end
   end
 
-  @doc """
-  Registers a middleware module to run for this router.
-  """
-  defmacro middleware(middleware) do
+  defmacro middleware(middleware, opts \\ []) do
     quote generated: true do
-      @registered_middlewares unquote(middleware)
+      @middlewares {unquote(middleware), unquote(opts)}
     end
   end
 
-  @doc """
-  Registers one or many routing keys with handler options.
-  """
-  defmacro register(routing_key_or_keys, opts) do
-    for routing_key <- List.wrap(routing_key_or_keys) do
+  defmacro routing_key(routing_key, opts \\ []) do
+    handlers = Keyword.get(opts, :handler) || Keyword.get(opts, :handlers, [])
+    handlers = List.wrap(handlers)
+
+    if Enum.empty?(handlers) do
       quote generated: true do
-        @registered {
+        @routing_keys {
           unquote(routing_key),
           Keyword.merge(@default_opts, unquote(opts))
         }
+      end
+    else
+      middlewares = Keyword.get(opts, :middlewares, [])
+
+      for handler <- List.wrap(handlers) do
+        tmp = [{Ming.Middleware.CallHandler, args: handler, order: 1000} | middlewares]
+
+        quote generated: true do
+          @routing_keys {
+            unquote(routing_key),
+            @default_opts
+            |> Keyword.merge(unquote(opts))
+            |> Keyword.put(:middleware, unquote(tmp))
+          }
+        end
       end
     end
   end
 
   @doc false
-  defmacro __before_compile__(env) do
-    registered = Module.get_attribute(env.module, :registered) || []
-    register_routing_keys = Enum.map(registered, &elem(&1, 0)) |> Enum.uniq()
-    register_by_routing_key = Enum.group_by(registered, &elem(&1, 0), &elem(&1, 1))
-
-    send_clauses =
-      for {routing_key, opts_list} <- register_by_routing_key do
-        if Enum.count(opts_list) == 1 do
-          current_opts = Enum.at(opts_list, 0)
-
-          quote do
-            defp do_send(unquote(routing_key), command, opts) do
-              do_dispatcher(
-                unquote(routing_key),
-                command,
-                unquote(Macro.escape(current_opts)),
-                opts
-              )
-            end
-          end
-        else
-          quote do
-            defp do_send(unquote(routing_key), _command, _opts),
-              do: {:error, :more_than_one_handler_found}
-          end
-        end
-      end
-
-    publish_clauses =
-      for {routing_key, opts_list} <- register_by_routing_key do
-        if Enum.count(opts_list) == 1 do
-          current_opts = Enum.at(opts_list, 0)
-
-          quote do
-            defp do_publish(unquote(routing_key), event, opts) do
-              do_dispatcher(
-                unquote(routing_key),
-                event,
-                unquote(Macro.escape(current_opts)),
-                opts
-              )
-            end
-          end
-        else
-          quote do
-            defp do_publish(unquote(routing_key), event, opts) do
-              all_opts = unquote(Macro.escape(opts_list))
-
-              Enum.map(
-                all_opts,
-                &do_dispatcher(unquote(routing_key), event, &1, opts)
-              )
-            end
-          end
-        end
-      end
-
+  defmacro __before_compile__(_env) do
     quote generated: true do
-      @doc """
-      Returns a list of all registered routing keys.
-      """
-      @spec __register_routing_keys__() :: [Ming.routing_key()]
-      def __register_routing_keys__, do: unquote(register_routing_keys)
+      @final_routing_keys Enum.map(
+                            @routing_keys,
+                            fn {key, opts} ->
+                              if Enum.empty?(@middlewares) do
+                                {key, opts}
+                              else
+                                middlewares = Keyword.get(opts, :middlewares, [])
 
-      @doc """
-      Sends a command to the handler registered for the given `routing_key`.
-      """
-      @spec send(Ming.routing_key(), any(), keyword(Ming.send_opts())) :: Ming.resp()
-      def send(routing_key, command, opts \\ []), do: do_send(routing_key, command, opts)
+                                opts =
+                                  Keyword.put(
+                                    items,
+                                    :middlewares,
+                                    middlewares ++ @middlewares
+                                  )
 
-      unquote(send_clauses)
-      defp do_send(_routing_key, _request, _opts), do: {:error, :unregistered_command}
+                                {key, opts}
+                              end
+                            end
+                          )
 
-      @doc """
-      Publishes an event to all handlers registered for the given `routing_key`.
-      """
-      @spec publish(Ming.routing_key(), any(), keyword(Ming.publish_opts())) ::
-              Ming.resp() | [Ming.resp()]
-      def publish(routing_key, event, opts \\ []), do: do_publish(routing_key, event, opts)
-
-      unquote(publish_clauses)
-      defp do_publish(_routing_key, _request, _opts), do: {:error, :unregistered_command}
-
-      defp do_dispatcher(routing_key, request, system_opts, user_opts) do
-        alias Ming.Context
-        alias Ming.Dispatcher
-
-        handler = Keyword.fetch!(system_opts, :handler)
-        middleware = Keyword.get(system_opts, :middleware, []) ++ @registered_middlewares
-
-        opts = Keyword.merge(system_opts, user_opts)
-        id = Keyword.get(opts, :id, UUIDv7.generate())
-        correlation_id = Keyword.get(opts, :correlation_id, UUIDv7.generate())
-        metadata = Keyword.get(opts, :metadata, %{})
-        timeout = Keyword.get(opts, :timeout, :infinity)
-
-        context = %Context{
-          assigns: %{},
-          id: id,
-          correlation_id: correlation_id,
-          handler: handler,
-          metadata: metadata,
-          middlewares: middleware ++ [Ming.Middleware.CallHandler],
-          request: request,
-          routing_key: routing_key,
-          timestamp: DateTime.utc_now(),
-          timeout: timeout
-        }
-
-        Dispatcher.dispatch(context)
-        |> Context.response()
-      end
+      def __routing_keys__, do: @final_routing_keys
     end
   end
 end

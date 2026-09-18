@@ -13,7 +13,6 @@ defmodule Ming.Context do
   defstruct [
     :id,
     :correlation_id,
-    :handler,
     :metadata,
     :request,
     :response,
@@ -22,7 +21,6 @@ defmodule Ming.Context do
     :timestamp,
     assigns: %{},
     halted?: false,
-    middlewares: []
   ]
 
   @doc """

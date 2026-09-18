@@ -1,147 +1,209 @@
 defmodule Ming.Dispatcher do
-  @moduledoc """
-  Executes the middleware pipeline for a given `Ming.Context`.
+  @doc false
+  defmacro __using__(opts) do
+    otp_app = Keyword.get(opts, :otp_app, :ming)
+    message_mapper = Keyword.get(opts, :message_mapper, Ming.Messaging.Mapper.Json)
 
-  When a numeric timeout is configured, dispatch runs in a task and is bounded
-  by that timeout. Otherwise it runs in-process.
+    metadata = Keyword.get(opts, :metadata, %{}) |> Macro.escape()
+    timeout = Keyword.get(opts, :timeout, :infinity)
 
-  ## Telemetry
+    executing_strategy = Keyword.get(opts, :executing_strategy, Ming.ExecutingStrategy.Sequencial)
 
-  The dispatcher emits the following telemetry events using `:telemetry.span/3`:
+    quote generated: true do
+      import unquote(__MODULE__)
 
-  * `[:ming, :dispatch, :start]` - Executed before the dispatch pipeline starts.
-  * `[:ming, :dispatch, :stop]` - Executed after the pipeline completes successfully.
-  * `[:ming, :dispatch, :exception]` - Executed when the pipeline raises an exception.
+      @before_compile unquote(__MODULE__)
 
-  All events receive the following metadata:
-  * `:handler` - The module handling the request
-  * `:pid` - The PID of the process executing the pipeline
-  * `:request_id` - The unique ID of the request
-  * `:correlation_id` - The correlation ID of the request
-  * `:routing_key` - The routing key used
-  * `:timeout` - The configured timeout
-  """
+      @otp_app unquote(otp_app)
+      @message_mapper unquote(message_mapper)
 
-  require Logger
+      @executing_strategy unquote(executing_strategy)
 
-  alias Ming.Context
+      @default_opts [
+        metadata: unquote(metadata),
+        timeout: unquote(timeout)
+      ]
 
-  @doc """
-  Dispatches a context through the middleware pipeline.
-  """
-  def dispatch(%Context{timeout: timeout} = context) when is_number(timeout) and timeout > 0 do
-    log_meta = log_metadata(context)
-
-    task = Task.async(fn -> do_dispatcher(context) end)
-
-    case Task.yield(task, timeout) do
-      {:ok, context} ->
-        Logger.debug("executed with success", log_meta)
-        context
-
-      {:exit, reason} ->
-        Logger.error(
-          "error during executing pipeline",
-          Keyword.put(log_meta, :crash_reason, inspect(reason))
-        )
-
-        context
-        |> Context.halt()
-        |> Context.respond({:error, reason})
-
-      nil ->
-        Logger.warning("timeout during executing, going to shutdown", log_meta)
-
-        Task.shutdown(task)
-
-        context
-        |> Context.halt()
-        |> Context.respond({:error, :timeout})
+      Module.register_attribute(__MODULE__, :routing_keys, accumulate: true)
+      Module.register_attribute(__MODULE__, :middlewares, accumulate: true)
     end
   end
 
-  def dispatch(%Context{} = context) do
-    log_meta = log_metadata(context)
-
-    try do
-      context = do_dispatcher(context)
-
-      Logger.debug("executed with success", log_meta)
-      context
-    rescue
-      reason ->
-        Logger.error(
-          "error during executing pipeline",
-          Keyword.put(log_meta, :crash_reason, inspect(reason))
-        )
-
-        context
-        |> Context.halt()
-        |> Context.respond({:error, reason})
+  defmacro middleware(middleware, opts \\ []) do
+    quote generated: true do
+      @middlewares {unquote(middleware), unquote(opts)}
     end
   end
 
-  defp do_dispatcher(%Context{} = context) do
-    telemetry_metadata = telemetry_metadata(context)
+  defmacro routing_key(routing_key, opts) do
+    handlers = Keyword.get(opts, :handler) || Keyword.get(opts, :handlers, [])
+    handlers = List.wrap(handlers)
 
-    :telemetry.span(
-      [:ming, :dispatch],
-      telemetry_metadata,
-      fn ->
-        context =
-          context
-          |> do_before()
-          |> do_after()
-
-        {context, telemetry_metadata}
+    if Enum.empty?(handlers) do
+      quote generated: true do
+        @routing_keys {
+          unquote(routing_key),
+          Keyword.merge(@default_opts, unquote(opts))
+        }
       end
-    )
-  end
+    else
+      middlewares = Keyword.get(opts, :middlewares, [])
 
-  defp do_before(%Context{} = context) do
-    Enum.reduce_while(context.middlewares, {context, []}, fn middleware, acc ->
-      {context, middlewares} = acc
+      for handler <- List.wrap(handlers) do
+        tmp = [{Ming.Middleware.CallHandler, args: handler, order: 1000} | middlewares]
 
-      context = middleware.before_handle(context)
-
-      # Always include the current middleware in the after-chain,
-      # even if it halts, so its after_handle is unwound.
-      middlewares = [middleware | middlewares]
-
-      if Context.halted?(context) do
-        {:halt, {context, middlewares}}
-      else
-        {:cont, {context, middlewares}}
+        quote generated: true do
+          @routing_keys {
+            unquote(routing_key),
+            @default_opts
+            |> Keyword.merge(unquote(opts))
+            |> Keyword.put(:middleware, unquote(tmp))
+          }
+        end
       end
-    end)
+    end
   end
 
-  defp do_after({%Context{} = context, middlewares}) when is_list(middlewares) do
-    Enum.reduce(middlewares, context, fn middleware, acc ->
-      context = acc
-      middleware.after_handle(context)
-    end)
+  defmacro router(router_ast) do
+    router = Macro.expand(router_ast, __CALLER__)
+
+    for routing_key <- router.__routing_keys__() do
+      quote generated: true do
+        @routing_keys unquote(routing_key)
+      end
+    end
   end
 
-  defp telemetry_metadata(%Context{} = context) do
-    %{
-      handler: context.handler,
-      pid: self(),
-      request_id: context.id,
-      correlation_id: context.correlation_id,
-      routing_key: context.routing_key,
-      timeout: context.timeout
-    }
-  end
+  defmacro __before_compile__(_envs) do
+    quote generated: true do
+      @final_routing_keys Enum.group_by(@routing_keys, &elem(&1, 0))
+                          |> Enum.map(fn {key, opts} ->
+                            opts =
+                              if Enum.empty?(@middlewares) do
+                                opts
+                              else
+                                Enum.map(opts, fn item ->
+                                  middlewares = Keyword.get(items, :middlewares, [])
 
-  defp log_metadata(%Context{} = context) do
-    [
-      handler: context.handler,
-      pid: self(),
-      request_id: context.id,
-      correlation_id: context.correlation_id,
-      routing_key: context.routing_key,
-      timeout: context.timeout
-    ]
+                                  Keyword.put(
+                                    items,
+                                    :middlewares,
+                                    middlewares ++ @middlewares
+                                  )
+                                end)
+                              end
+
+                            opts =
+                              Enum.map(opts, fn item ->
+                                middlewares =
+                                  Keyword.get(items, :middlewares, [])
+                                  |> Enum.sort(
+                                    &(Keyword.get(&2, :order, 0) >= Keyword.get(&1, :order, 0))
+                                  )
+
+                                Keyword.put(items, :middlewares, middlewares)
+                              end)
+
+                            {key, opts}
+                          end)
+
+      defp executing_strategy(:sequencial), do: {Ming.ExecutingStrategy.Sequencial, []}
+      defp executing_strategy(:parallel), do: {Ming.ExecutingStrategy.Parallel, []}
+      defp executing_strategy(other), do: other
+
+      for {routing_key, middlewares} <- @final_routing_keys do
+        @routing_key routing_key
+        @pipelines Enum.map(middlewares, %Ming.Pipeline{middlewares: middlewares})
+        @pipelines_counter Enum.count(@pipelines)
+
+        defp do_dispatcher(@routing_key, :send, opts) do
+          if @pipelines_counter > 1 do
+            {:error, :more_than_one_pipeline_found}
+          else
+            middlewares = Keyword.get(opts, :middlewares, [])
+
+            do_dispatcher(
+              @routing_key,
+              Ming.Pipeline.concat(@pipelines, middlewares),
+              :send,
+              opts
+            )
+          end
+        end
+
+        defp do_dispatcher(@routing_key, operation, opts) do
+          middlewares = Keyword.get(opts, :middlewares, [])
+
+          do_dispatcher(
+            @routing_key,
+            Ming.Pipeline.concat(@pipelines, middlewares),
+            operation,
+            opts
+          )
+        end
+      end
+
+      defp do_dispatcher(routing_key, pipelines, operation, opts) do
+        request = Keyword.fetch!(opts, :request)
+
+        context = %Ming.Context{
+          id: Keyword.get(opts, :id, UUIDv7.generate()),
+          correlation_id: Keyword.get(opts, :id, UUIDv7.generate()),
+          metadata: Keyword.get(opts, :metadata, %{}),
+          request: request,
+          routing_key: routing_key,
+          timeout: Keyword.get(opts, :timeout, 5000),
+          timestamp: Keyword.get(opts, :timestamp, DateTime.utc_now())
+        }
+
+        {executing_strategy, args} =
+          Keyword.get(opts, :executing_strategy, @executing_strategy)
+          |> executing_strategy()
+
+        executing_strategy.execute(context, @pipelines, args)
+      end
+
+      defp request_to_routing_key(request) when is_struct(request) do
+        request.__struct__
+      end
+
+      defp request_to_routing_key(request) when is_atom(request) or is_binary(request) do
+        request
+      end
+
+      defp request_to_routing_key(request), do: raise("")
+
+      defp resolve_routing_key(request, opts) do
+        Keyword.get(opts, :routing_key) || request_to_routing_key(request)
+      end
+
+      def send(command, opts_or_timeout \\ [])
+
+      def send(command, timeout) when is_integer(timeout), do: send(commad, timeout: timeout)
+
+      def send(command, :infinity), do: send(commad, timeout: :infinity)
+
+      def send(command, opts) do
+        do_dispatcher(
+          resolve_routing_key(commad),
+          :send,
+          Keyword.put(opts, :request, command)
+        )
+      end
+
+      def publish(event, opts_or_timeout \\ [])
+
+      def publish(event, timeout) when is_integer(timeout), do: publish(event, timeout: timeout)
+
+      def publish(event, :infinity), do: publish(event, timeout: :infinity)
+
+      def publish(event, opts) do
+        do_dispatcher(
+          resolve_routing_key(event),
+          :publish,
+          Keyword.put(opts, :request, event)
+        )
+      end
+    end
   end
 end
