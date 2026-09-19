@@ -38,14 +38,7 @@ defmodule Ming.MixProject do
   defp deps do
     [
       # UUID V7
-      {:uuid_v7, "~> 0.6.0"},
-
-      # Telemetry
-      {:telemetry, "~> 0.4 or ~> 1.0"},
-      {:telemetry_registry, "~> 0.2 or ~> 0.3"},
-
-      # Message Mapper
-      {:jason, "~> 1.4", optional: true}
+      {:uuid_v7, "~> 0.6.0"}
     ]
   end
 

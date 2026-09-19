@@ -1,53 +1,58 @@
 defmodule Ming.RouterTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
-  defmodule MyCommand do
-    defstruct [:value]
+  defmodule HandlerA do
+    @behaviour Ming.Handler
+    def handle(request, _context), do: {:ok, request}
   end
 
-  defmodule MyEvent do
-    defstruct [:value]
+  defmodule HandlerB do
+    @behaviour Ming.Handler
+    def handle(_request, _context), do: :ok
   end
 
-  defmodule MyHandler do
-    def handle(%MyCommand{}, _context), do: :ok
-    def handle(%MyEvent{}, _context), do: :ok
-    def handle(%{payload: _}, _context), do: :ok
+  defmodule SampleMiddleware do
+    @behaviour Ming.Middleware
+    def execute(context, _args, next), do: next.(context)
   end
 
-  defmodule MyRouter do
+  defmodule SampleRouter do
     use Ming.Router
 
-    register(MyCommand, handler: MyHandler)
-    register(MyEvent, handler: MyHandler)
-    register(:my_atom_key, handler: MyHandler)
+    middleware(SampleMiddleware)
+
+    routing_key("one", handler: HandlerA)
+    routing_key(["two", "three"], handler: HandlerB)
+    routing_key("many", handlers: [HandlerA, HandlerB])
+    routing_key("bare")
   end
 
-  describe "send/3" do
-    test "routes command to handler" do
-      assert MyRouter.send(MyCommand, %MyCommand{value: 1}) == :ok
-    end
+  test "declares one entry per key/handler pair" do
+    keys = SampleRouter.__routing_keys__()
 
-    test "routes command to handler when routing key is an atom" do
-      assert MyRouter.send(:my_atom_key, %{payload: 1}) == :ok
-    end
+    assert {"one", one_opts} = List.keyfind(keys, "one", 0)
+    assert {"two", _} = List.keyfind(keys, "two", 0)
+    assert {"three", _} = List.keyfind(keys, "three", 0)
+    assert {"bare", bare_opts} = List.keyfind(keys, "bare", 0)
 
-    test "returns unregistered for unknown routing key" do
-      assert MyRouter.send(UnknownKey, %MyCommand{value: 1}) == {:error, :unregistered_command}
+    assert length(for {"many", _} <- keys, do: true) == 2
+
+    assert List.last(one_opts[:middlewares]) ==
+             {Ming.Middleware.HandlerRunner, [args: HandlerA, order: 10_000]}
+
+    assert bare_opts[:middlewares] == [{SampleMiddleware, []}]
+  end
+
+  test "router-level middleware wraps every pipeline" do
+    for {key, opts} <- SampleRouter.__routing_keys__() do
+      assert {SampleMiddleware, []} in opts[:middlewares],
+             "expected router middleware in pipeline for #{key}"
     end
   end
 
-  describe "publish/3" do
-    test "routes event to handler" do
-      assert MyRouter.publish(MyEvent, %MyEvent{value: 2}) == :ok
-    end
-
-    test "routes event to handler when routing key is an atom" do
-      assert MyRouter.publish(:my_atom_key, %{payload: 2}) == :ok
-    end
-
-    test "returns unregistered for unknown routing key" do
-      assert MyRouter.publish(UnknownKey, %MyEvent{value: 1}) == {:error, :unregistered_command}
-    end
+  test "keeps default opts" do
+    {"one", opts} = List.keyfind(SampleRouter.__routing_keys__(), "one", 0)
+    assert opts[:timeout] == :infinity
+    assert opts[:metadata] == %{}
   end
 end

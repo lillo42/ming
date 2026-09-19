@@ -1,205 +1,200 @@
 defmodule Ming.Dispatcher do
+  @moduledoc """
+  Compiles routing keys into dispatch functions.
+
+  A dispatcher declares routing keys directly and/or imports them from a
+  `Ming.Router`, then generates `send/2` and `publish/2`:
+
+      defmodule MyApp.Dispatcher do
+        use Ming.Dispatcher
+
+        router MyApp.Router
+
+        routing_key "reports.generate", handler: MyApp.GenerateReportHandler
+      end
+
+  `send/2` requires exactly one handler for the key and returns its
+  response; `publish/2` runs every handler's pipeline and returns a list of
+  responses. The routing key defaults to the request struct module and can
+  be overridden with the `:routing_key` option.
+  """
+
   @doc false
   defmacro __using__(opts) do
-    otp_app = Keyword.get(opts, :otp_app, :ming)
-    message_mapper = Keyword.get(opts, :message_mapper, Ming.Messaging.Mapper.Json)
-
-    metadata = Keyword.get(opts, :metadata, %{}) |> Macro.escape()
+    metadata = Keyword.get(opts, :metadata, Macro.escape(%{}))
     timeout = Keyword.get(opts, :timeout, :infinity)
-
-    executing_strategy = Keyword.get(opts, :executing_strategy, Ming.ExecutingStrategy.Sequencial)
+    execution_strategy = Keyword.get(opts, :execution_strategy, Ming.ExecutionStrategy.Sequential)
 
     quote generated: true do
-      import unquote(__MODULE__)
+      # Dispatchers define their own send/2.
+      import Kernel, except: [send: 2]
+      import Ming.Registration
+      import Ming.Dispatcher, only: [router: 1]
 
-      @before_compile unquote(__MODULE__)
+      @before_compile Ming.Dispatcher
 
-      @otp_app unquote(otp_app)
-      @message_mapper unquote(message_mapper)
+      Module.register_attribute(__MODULE__, :routing_keys, accumulate: true)
+      Module.register_attribute(__MODULE__, :middlewares, accumulate: true)
 
-      @executing_strategy unquote(executing_strategy)
-
+      @execution_strategy unquote(execution_strategy)
       @default_opts [
         metadata: unquote(metadata),
         timeout: unquote(timeout)
       ]
-
-      Module.register_attribute(__MODULE__, :routing_keys, accumulate: true)
-      Module.register_attribute(__MODULE__, :middlewares, accumulate: true)
     end
   end
 
-  defmacro middleware(middleware, opts \\ []) do
-    quote generated: true do
-      @middlewares {unquote(middleware), unquote(opts)}
-    end
-  end
-
-  defmacro routing_key(routing_key, opts) do
-    handlers = Keyword.get(opts, :handler) || Keyword.get(opts, :handlers, [])
-    handlers = List.wrap(handlers)
-
-    if Enum.empty?(handlers) do
-      quote generated: true do
-        @routing_keys {
-          unquote(routing_key),
-          Keyword.merge(@default_opts, unquote(opts))
-        }
-      end
-    else
-      middlewares = Keyword.get(opts, :middlewares, [])
-
-      for handler <- List.wrap(handlers) do
-        tmp = [{Ming.Middleware.CallHandler, args: handler, order: 1000} | middlewares]
-
-        quote generated: true do
-          @routing_keys {
-            unquote(routing_key),
-            @default_opts
-            |> Keyword.merge(unquote(opts))
-            |> Keyword.put(:middleware, unquote(tmp))
-          }
-        end
-      end
-    end
-  end
-
+  @doc """
+  Imports every routing key declared in the given `Ming.Router` module.
+  """
   defmacro router(router_ast) do
     router = Macro.expand(router_ast, __CALLER__)
 
-    for routing_key <- router.__routing_keys__() do
+    for {routing_key, opts} <- router.__routing_keys__() do
       quote generated: true do
-        @routing_keys unquote(routing_key)
+        @routing_keys {unquote(routing_key), unquote(Macro.escape(opts))}
       end
     end
   end
 
-  defmacro __before_compile__(_envs) do
-    quote generated: true do
-      @final_routing_keys Enum.group_by(@routing_keys, &elem(&1, 0))
-                          |> Enum.map(fn {key, opts} ->
-                            opts =
-                              if Enum.empty?(@middlewares) do
-                                opts
-                              else
-                                Enum.map(opts, fn item ->
-                                  middlewares = Keyword.get(items, :middlewares, [])
+  @doc false
+  defmacro __before_compile__(env) do
+    routing_keys = env.module |> Module.get_attribute(:routing_keys) |> Enum.reverse()
+    middlewares = env.module |> Module.get_attribute(:middlewares) |> Enum.reverse()
 
-                                  Keyword.put(
-                                    items,
-                                    :middlewares,
-                                    middlewares ++ @middlewares
-                                  )
-                                end)
-                              end
+    grouped =
+      routing_keys
+      |> Enum.map(fn {key, opts} ->
+        {key, Keyword.update(opts, :middlewares, middlewares, &(middlewares ++ &1))}
+      end)
+      |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
 
-                            opts =
-                              Enum.map(opts, fn item ->
-                                middlewares =
-                                  Keyword.get(items, :middlewares, [])
-                                  |> Enum.sort(
-                                    &(Keyword.get(&2, :order, 0) >= Keyword.get(&1, :order, 0))
-                                  )
+    clauses =
+      for {routing_key, opts_list} <- grouped do
+        pipelines =
+          Enum.map(opts_list, fn opts ->
+            Ming.Pipeline.concat(
+              %Ming.Pipeline{middlewares: []},
+              Keyword.get(opts, :middlewares, [])
+            )
+          end)
 
-                                Keyword.put(items, :middlewares, middlewares)
-                              end)
+        key_opts = opts_list |> List.first() |> Keyword.drop([:middlewares])
 
-                            {key, opts}
-                          end)
+        quote generated: true do
+          defp do_dispatch(unquote(routing_key), :send, opts) do
+            case unquote(Macro.escape(pipelines)) do
+              [pipeline] ->
+                [response] =
+                  run_pipelines(
+                    unquote(routing_key),
+                    [pipeline],
+                    unquote(Macro.escape(key_opts)),
+                    opts
+                  )
 
-      defp executing_strategy(:sequencial), do: {Ming.ExecutingStrategy.Sequencial, []}
-      defp executing_strategy(:parallel), do: {Ming.ExecutingStrategy.Parallel, []}
-      defp executing_strategy(other), do: other
+                response
 
-      for {routing_key, middlewares} <- @final_routing_keys do
-        @routing_key routing_key
-        @pipelines Enum.map(middlewares, %Ming.Pipeline{middlewares: middlewares})
-        @pipelines_counter Enum.count(@pipelines)
+              _pipelines ->
+                {:error, :more_than_one_handler_found}
+            end
+          end
 
-        defp do_dispatcher(@routing_key, :send, opts) do
-          if @pipelines_counter > 1 do
-            {:error, :more_than_one_pipeline_found}
-          else
-            middlewares = Keyword.get(opts, :middlewares, [])
-
-            do_dispatcher(
-              @routing_key,
-              Ming.Pipeline.concat(@pipelines, middlewares),
-              :send,
+          defp do_dispatch(unquote(routing_key), :publish, opts) do
+            run_pipelines(
+              unquote(routing_key),
+              unquote(Macro.escape(pipelines)),
+              unquote(Macro.escape(key_opts)),
               opts
             )
           end
         end
-
-        defp do_dispatcher(@routing_key, operation, opts) do
-          middlewares = Keyword.get(opts, :middlewares, [])
-
-          do_dispatcher(
-            @routing_key,
-            Ming.Pipeline.concat(@pipelines, middlewares),
-            operation,
-            opts
-          )
-        end
       end
 
-      defp do_dispatcher(routing_key, pipelines, operation, opts) do
-        request = Keyword.fetch!(opts, :request)
+    quote generated: true do
+      unquote(clauses)
+
+      defp do_dispatch(_routing_key, _operation, _opts), do: {:error, :unregistered_routing_key}
+
+      defp run_pipelines(routing_key, pipelines, key_opts, opts) do
+        opts = @default_opts |> Keyword.merge(key_opts) |> Keyword.merge(opts)
 
         context = %Ming.Context{
           id: Keyword.get(opts, :id, UUIDv7.generate()),
-          correlation_id: Keyword.get(opts, :id, UUIDv7.generate()),
+          correlation_id: Keyword.get(opts, :correlation_id, UUIDv7.generate()),
           metadata: Keyword.get(opts, :metadata, %{}),
-          request: request,
+          request: Keyword.fetch!(opts, :request),
           routing_key: routing_key,
-          timeout: Keyword.get(opts, :timeout, 5000),
+          timeout: Keyword.get(opts, :timeout, :infinity),
           timestamp: Keyword.get(opts, :timestamp, DateTime.utc_now())
         }
 
-        {executing_strategy, args} =
-          Keyword.get(opts, :executing_strategy, @executing_strategy)
-          |> executing_strategy()
+        extra_middlewares = Keyword.get(opts, :middlewares, [])
 
-        executing_strategy.execute(context, @pipelines, args)
+        {strategy, args} =
+          opts
+          |> Keyword.get(:execution_strategy, @execution_strategy)
+          |> resolve_strategy()
+
+        pipelines
+        |> Enum.map(&Ming.Pipeline.concat(&1, extra_middlewares))
+        |> strategy.execute(context, args)
+        |> Enum.map(&Ming.Context.response/1)
       end
 
-      defp request_to_routing_key(request) when is_struct(request) do
-        request.__struct__
-      end
+      defp resolve_strategy(:sequential), do: {Ming.ExecutionStrategy.Sequential, []}
+      defp resolve_strategy(:parallel), do: {Ming.ExecutionStrategy.Parallel, []}
+      defp resolve_strategy({module, args}), do: {module, args}
+      defp resolve_strategy(module) when is_atom(module), do: {module, []}
 
-      defp request_to_routing_key(request) when is_atom(request) or is_binary(request) do
-        request
-      end
+      defp infer_routing_key(request) when is_struct(request), do: request.__struct__
 
-      defp request_to_routing_key(request), do: raise("")
+      defp infer_routing_key(request) when is_atom(request) or is_binary(request),
+        do: request
+
+      defp infer_routing_key(request) do
+        raise ArgumentError,
+              "cannot infer a routing key from #{inspect(request)}, " <>
+                "use a struct or pass the :routing_key option"
+      end
 
       defp resolve_routing_key(request, opts) do
-        Keyword.get(opts, :routing_key) || request_to_routing_key(request)
+        Keyword.get(opts, :routing_key) || infer_routing_key(request)
       end
 
+      @doc """
+      Sends a command to the single handler registered for its routing key.
+      """
+      @spec send(any(), timeout() | Ming.dispatch_opts()) :: Ming.resp()
       def send(command, opts_or_timeout \\ [])
 
-      def send(command, timeout) when is_integer(timeout), do: send(commad, timeout: timeout)
+      def send(command, timeout) when is_integer(timeout), do: do_send(command, timeout: timeout)
+      def send(command, :infinity), do: do_send(command, timeout: :infinity)
+      def send(command, opts) when is_list(opts), do: do_send(command, opts)
 
-      def send(command, :infinity), do: send(commad, timeout: :infinity)
-
-      def send(command, opts) do
-        do_dispatcher(
-          resolve_routing_key(commad),
+      defp do_send(command, opts) do
+        do_dispatch(
+          resolve_routing_key(command, opts),
           :send,
           Keyword.put(opts, :request, command)
         )
       end
 
+      @doc """
+      Publishes an event to every handler registered for its routing key.
+      """
+      @spec publish(any(), timeout() | Ming.dispatch_opts()) :: [Ming.resp()]
       def publish(event, opts_or_timeout \\ [])
 
-      def publish(event, timeout) when is_integer(timeout), do: publish(event, timeout: timeout)
+      def publish(event, timeout) when is_integer(timeout),
+        do: do_publish(event, timeout: timeout)
 
-      def publish(event, :infinity), do: publish(event, timeout: :infinity)
+      def publish(event, :infinity), do: do_publish(event, timeout: :infinity)
+      def publish(event, opts) when is_list(opts), do: do_publish(event, opts)
 
-      def publish(event, opts) do
-        do_dispatcher(
-          resolve_routing_key(event),
+      defp do_publish(event, opts) do
+        do_dispatch(
+          resolve_routing_key(event, opts),
           :publish,
           Keyword.put(opts, :request, event)
         )
