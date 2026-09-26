@@ -21,26 +21,39 @@ defmodule Ming.Dispatcher do
 
   @doc false
   defmacro __using__(opts) do
+    otp_app = Keyword.get(opts, :otp_app, :ming)
+
     metadata = Keyword.get(opts, :metadata, Macro.escape(%{}))
     timeout = Keyword.get(opts, :timeout, :infinity)
     execution_strategy = Keyword.get(opts, :execution_strategy, Ming.ExecutionStrategy.Sequential)
+
+    # TODO update it
+    mapper = Keyword.get(opts, :mapper, :json)
+    batch_processing = Keyword.get(opts, :batch_processing, :sequential)
 
     quote generated: true do
       # Dispatchers define their own send/2.
       import Kernel, except: [send: 2]
       import Ming.Registration
-      import Ming.Dispatcher, only: [router: 1]
+      import Ming.Dispatcher, only: [router: 1, gateway: 3, transformer: 2]
 
       @before_compile Ming.Dispatcher
 
+      @otp_app unquote(otp_app)
+
       Module.register_attribute(__MODULE__, :routing_keys, accumulate: true)
       Module.register_attribute(__MODULE__, :middlewares, accumulate: true)
+      Module.register_attribute(__MODULE__, :gateways, accumulate: true)
+      Module.register_attribute(__MODULE__, :transformers, accumulate: true)
 
-      @execution_strategy unquote(execution_strategy)
       @default_opts [
         metadata: unquote(metadata),
         timeout: unquote(timeout)
       ]
+
+      @batch_processing unquote(batch_processing)
+      @execution_strategy unquote(execution_strategy)
+      @mapper unquote(mapper)
     end
   end
 
@@ -54,6 +67,43 @@ defmodule Ming.Dispatcher do
       quote generated: true do
         @routing_keys {unquote(routing_key), unquote(Macro.escape(opts))}
       end
+    end
+  end
+
+  defmacro transformer(transformer, opts \\ []) do
+    quote generated: true do
+      @transformers {unquote(transformer), unquote(opts)}
+    end
+  end
+
+  defmacro gateway(name, adapter, opts) do
+    quote generated: true do
+      opts = unquote(opts)
+
+      mapper = Keyword.get(opts, :mapper, @mapper)
+      batch_processing = Keyword.get(opts, :batch_processing, @batch_processing)
+
+      config =
+        opts
+        |> Map.new()
+        |> Map.put(:adapter, unquote(adapter))
+        |> Map.update(:publications, [], fn pubs ->
+          Enum.map(pubs, fn pub ->
+            pub
+            |> Map.put(:gateway_name, unquote(name))
+            |> Map.put_new(:mapper, mapper)
+          end)
+        end)
+        |> Map.update(:subscriptions, [], fn subs ->
+          Enum.map(subs, fn sub ->
+            sub
+            |> Map.put(:gateway_name, unquote(name))
+            |> Map.put_new(:batch_processing, batch_processing)
+            |> Map.put_new(:mapper, mapper)
+          end)
+        end)
+
+      @gateways {unquote(name), config}
     end
   end
 
@@ -199,6 +249,48 @@ defmodule Ming.Dispatcher do
           Keyword.put(opts, :request, event)
         )
       end
+
+      @resolved_gateways Enum.map(Enum.reverse(@gateways), fn {name, config} ->
+                  {name,
+                   config
+                   |> Map.update(:publications, [], fn pubs ->
+                     Enum.map(pubs, fn pub ->
+                       pub
+                       |> Map.put_new(:transformers, [])
+                       |> Map.update!(:transformers, fn transformers ->
+                         Enum.sort_by(transformers ++ @transformers, fn {_module, opts} ->
+                           Keyword.get(opts, :order, 1)
+                         end)
+                       end)
+                     end)
+                   end)
+                   |> Map.update(:subscriptions, [], fn subs ->
+                     Enum.map(subs, fn sub ->
+                       sub
+                       |> Map.put_new(:transformers, [])
+                       |> Map.update!(:transformers, fn transformers ->
+                         Enum.sort_by(transformers ++ @transformers, fn {_module, opts} ->
+                           Keyword.get(opts, :order, 1)
+                         end)
+                       end)
+                     end)
+                   end)}
+                end)
+
+      def __gateways__, do: @resolved_gateways
+
+      def config do
+        defaults = [
+          gateways: @resolved_gateways,
+          mapper: @mapper,
+          timeout: @default_opts[:timeout]
+        ]
+
+        app_env = Application.get_env(@otp_app, __MODULE__, [])
+        Ming.Dispatcher.Config.merge(defaults, app_env)
+      end
+
+      defoverridable config: 0
     end
   end
 end

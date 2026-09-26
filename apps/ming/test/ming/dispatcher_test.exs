@@ -182,4 +182,101 @@ defmodule Ming.DispatcherTest do
                DefaultsDispatcher.send(:hello, routing_key: "one", metadata: %{tenant: "acme"})
     end
   end
+
+  defmodule T1 do
+    def transform(message), do: message
+  end
+
+  defmodule T2 do
+    def transform(message), do: message
+  end
+
+  defmodule T3 do
+    def transform(message), do: message
+  end
+
+  defmodule GatewayDispatcher do
+    use Ming.Dispatcher, timeout: 1_234
+
+    transformer(T2, order: 5)
+    transformer(T3, order: 10)
+
+    gateway(:kafka, FakeAdapter,
+      connection: [endpoints: [{"localhost", 9092}]],
+      publications: [
+        %{routing_key: :created, transformers: [{T1, [args: :pub, order: 2]}]}
+      ],
+      subscriptions: [
+        %{name: :orders, routing_key: :created, batch_processing: :parallel}
+      ]
+    )
+  end
+
+  describe "gateway/3" do
+    test "stores the adapter and injects gateway name and mapper defaults" do
+      config = GatewayDispatcher.__gateways__()[:kafka]
+
+      assert config.adapter == FakeAdapter
+      assert config.connection == [endpoints: [{"localhost", 9092}]]
+
+      [publication] = config.publications
+      assert publication.gateway_name == :kafka
+      assert publication.mapper == :json
+
+      [subscription] = config.subscriptions
+      assert subscription.gateway_name == :kafka
+      assert subscription.mapper == :json
+    end
+
+    test "keeps per-subscription batch_processing over the dispatcher default" do
+      [subscription] = GatewayDispatcher.__gateways__()[:kafka].subscriptions
+
+      assert subscription.batch_processing == :parallel
+    end
+  end
+
+  describe "transformer/2" do
+    test "merges dispatcher transformers into publications and subscriptions by :order" do
+      [publication] = GatewayDispatcher.__gateways__()[:kafka].publications
+
+      assert publication.transformers == [
+               {T1, [args: :pub, order: 2]},
+               {T2, [order: 5]},
+               {T3, [order: 10]}
+             ]
+
+      [subscription] = GatewayDispatcher.__gateways__()[:kafka].subscriptions
+
+      assert subscription.transformers == [{T2, [order: 5]}, {T3, [order: 10]}]
+    end
+  end
+
+  describe "config/0" do
+    setup do
+      on_exit(fn -> Application.delete_env(:ming, GatewayDispatcher) end)
+    end
+
+    test "returns the compile-time defaults" do
+      config = GatewayDispatcher.config()
+
+      assert config[:mapper] == :json
+      assert config[:timeout] == 1_234
+      assert config[:gateways][:kafka].adapter == FakeAdapter
+    end
+
+    test "merges overrides from the application environment" do
+      Application.put_env(:ming, GatewayDispatcher,
+        timeout: 9_000,
+        gateways: [kafka: [publications: [[routing_key: :created, topic_or_queue: "orders.v2"]]]]
+      )
+
+      config = GatewayDispatcher.config()
+
+      assert config[:timeout] == 9_000
+
+      [publication] = config[:gateways][:kafka].publications
+      assert publication.topic_or_queue == "orders.v2"
+      assert publication.gateway_name == :kafka
+    end
+  end
 end
