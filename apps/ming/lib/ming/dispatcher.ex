@@ -17,6 +17,9 @@ defmodule Ming.Dispatcher do
   response; `publish/2` runs every handler's pipeline and returns a list of
   responses. The routing key defaults to the request struct module and can
   be overridden with the `:routing_key` option.
+
+  `post/2` encodes the request with the publication's mapper and produces
+  it through the gateway that declares a publication for the routing key.
   """
 
   @doc false
@@ -27,7 +30,6 @@ defmodule Ming.Dispatcher do
     timeout = Keyword.get(opts, :timeout, :infinity)
     execution_strategy = Keyword.get(opts, :execution_strategy, Ming.ExecutionStrategy.Sequential)
 
-    # TODO update it
     mapper = Keyword.get(opts, :mapper, :json)
     batch_processing = Keyword.get(opts, :batch_processing, :sequential)
 
@@ -54,6 +56,42 @@ defmodule Ming.Dispatcher do
       @batch_processing unquote(batch_processing)
       @execution_strategy unquote(execution_strategy)
       @mapper unquote(mapper)
+
+      # Internal pipeline backing post/2: encodes the request into a
+      # %Ming.Messaging.Message{} and produces it through the gateway.
+      routing_key(:ming_post_message,
+        handler: Ming.Messaging.ProduceHandler,
+        middlewares: [{Ming.Messaging.Middleware.Encode, [order: 0]}]
+      )
+
+      @doc """
+      Resolves the publication for the given routing key from the merged
+      gateway configuration. Returns `nil` when no publication matches.
+      """
+      def resolve_publication(routing_key) do
+        Enum.find_value(config()[:gateways], fn {_name, gateway} ->
+          Enum.find(gateway[:publications] || [], &(&1.routing_key == routing_key))
+        end)
+      end
+
+      defoverridable resolve_publication: 1
+
+      @doc """
+      Returns the dispatcher configuration: the compile-time defaults merged
+      with the application environment (`config @otp_app, __MODULE__, ...`).
+      """
+      def config do
+        defaults = [
+          gateways: __gateways__(),
+          mapper: @mapper,
+          timeout: @default_opts[:timeout]
+        ]
+
+        app_env = Application.get_env(@otp_app, __MODULE__, [])
+        Ming.Dispatcher.Config.merge(defaults, app_env)
+      end
+
+      defoverridable config: 0
     end
   end
 
@@ -70,12 +108,25 @@ defmodule Ming.Dispatcher do
     end
   end
 
+  @doc """
+  Declares a dispatcher-level transformer, merged into every gateway
+  publication and subscription and sorted by the `:order` option
+  (default `1`).
+  """
   defmacro transformer(transformer, opts \\ []) do
     quote generated: true do
       @transformers {unquote(transformer), unquote(opts)}
     end
   end
 
+  @doc """
+  Declares a gateway with the given name and adapter.
+
+  Publications and subscriptions inherit the dispatcher's `:mapper` and
+  `:batch_processing` defaults unless overridden per gateway or per entry.
+  The same gateway can be overridden at runtime through the application
+  environment (see `c:config/0`).
+  """
   defmacro gateway(name, adapter, opts) do
     quote generated: true do
       opts = unquote(opts)
@@ -111,6 +162,10 @@ defmodule Ming.Dispatcher do
   defmacro __before_compile__(env) do
     routing_keys = env.module |> Module.get_attribute(:routing_keys) |> Enum.reverse()
     middlewares = env.module |> Module.get_attribute(:middlewares) |> Enum.reverse()
+
+    env.module
+    |> Module.get_attribute(:gateways)
+    |> validate_unique_publications!()
 
     grouped =
       routing_keys
@@ -250,47 +305,95 @@ defmodule Ming.Dispatcher do
         )
       end
 
-      @resolved_gateways Enum.map(Enum.reverse(@gateways), fn {name, config} ->
-                  {name,
-                   config
-                   |> Map.update(:publications, [], fn pubs ->
-                     Enum.map(pubs, fn pub ->
-                       pub
-                       |> Map.put_new(:transformers, [])
-                       |> Map.update!(:transformers, fn transformers ->
-                         Enum.sort_by(transformers ++ @transformers, fn {_module, opts} ->
-                           Keyword.get(opts, :order, 1)
-                         end)
-                       end)
-                     end)
-                   end)
-                   |> Map.update(:subscriptions, [], fn subs ->
-                     Enum.map(subs, fn sub ->
-                       sub
-                       |> Map.put_new(:transformers, [])
-                       |> Map.update!(:transformers, fn transformers ->
-                         Enum.sort_by(transformers ++ @transformers, fn {_module, opts} ->
-                           Keyword.get(opts, :order, 1)
-                         end)
-                       end)
-                     end)
-                   end)}
-                end)
+      @doc """
+      Posts a request to the publication registered for its routing key.
+      """
+      @spec post(any(), timeout() | Ming.dispatch_opts()) :: Ming.resp()
+      def post(request, opts_or_timeout \\ [])
 
-      def __gateways__, do: @resolved_gateways
+      def post(request, timeout) when is_integer(timeout), do: do_post(request, timeout: timeout)
+      def post(request, :infinity), do: do_post(request, timeout: :infinity)
+      def post(request, opts) when is_list(opts), do: do_post(request, opts)
 
-      def config do
-        defaults = [
-          gateways: @resolved_gateways,
-          mapper: @mapper,
-          timeout: @default_opts[:timeout]
-        ]
+      defp do_post(request, opts) do
+        routing_key = resolve_routing_key(request, opts)
 
-        app_env = Application.get_env(@otp_app, __MODULE__, [])
-        Ming.Dispatcher.Config.merge(defaults, app_env)
+        case resolve_publication(routing_key) do
+          nil ->
+            {:error, :publication_not_found}
+
+          publication ->
+            metadata =
+              opts
+              |> Keyword.get(:metadata, %{})
+              |> Map.put(:ming_mapper, publication[:mapper] || @mapper)
+              |> Map.put(:ming_routing_key, routing_key)
+              |> Map.put(:ming_publication, publication)
+              |> Map.put(:ming_dispatcher, __MODULE__)
+
+            do_dispatch(
+              :ming_post_message,
+              :send,
+              opts
+              |> Keyword.put(:request, request)
+              |> Keyword.put(:metadata, metadata)
+            )
+        end
       end
 
-      defoverridable config: 0
+      @resolved_gateways Enum.map(Enum.reverse(@gateways), fn {name, config} ->
+                           {name,
+                            config
+                            |> Map.update(:publications, [], fn pubs ->
+                              Enum.map(pubs, fn pub ->
+                                pub
+                                |> Map.put_new(:gateway_name, name)
+                                |> Map.put_new(:transformers, [])
+                                |> Map.update!(:transformers, fn transformers ->
+                                  Enum.sort_by(
+                                    transformers ++ Enum.reverse(@transformers),
+                                    fn {_module, opts} -> Keyword.get(opts, :order, 1) end
+                                  )
+                                end)
+                              end)
+                            end)
+                            |> Map.update(:subscriptions, [], fn subs ->
+                              Enum.map(subs, fn sub ->
+                                sub
+                                |> Map.put_new(:gateway_name, name)
+                                |> Map.put_new(:transformers, [])
+                                |> Map.update!(:transformers, fn transformers ->
+                                  Enum.sort_by(
+                                    transformers ++ Enum.reverse(@transformers),
+                                    fn {_module, opts} -> Keyword.get(opts, :order, 1) end
+                                  )
+                                end)
+                              end)
+                            end)}
+                         end)
+
+      @doc """
+      Returns the compile-time resolved gateway configuration, without
+      application environment overrides. Use `config/0` for the merged view.
+      """
+      def __gateways__, do: @resolved_gateways
     end
+  end
+
+  defp validate_unique_publications!(gateways) do
+    gateways
+    |> Enum.flat_map(fn {gateway_name, config} ->
+      Enum.map(Map.get(config, :publications, []), &{&1.routing_key, gateway_name})
+    end)
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    |> Enum.each(fn
+      {_routing_key, [_gateway]} ->
+        :ok
+
+      {routing_key, gateway_names} ->
+        raise ArgumentError,
+              "duplicated publication routing key #{inspect(routing_key)} " <>
+                "declared in gateways: #{inspect(Enum.uniq(gateway_names))}"
+    end)
   end
 end

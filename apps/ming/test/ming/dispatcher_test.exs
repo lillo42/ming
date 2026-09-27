@@ -279,4 +279,74 @@ defmodule Ming.DispatcherTest do
       assert publication.gateway_name == :kafka
     end
   end
+
+  describe "publication routing key validation" do
+    test "raises on duplicated routing keys across gateways" do
+      assert_raise ArgumentError, ~r/duplicated publication routing key :dup/, fn ->
+        defmodule DuplicateAcrossGatewaysDispatcher do
+          use Ming.Dispatcher
+
+          gateway(:a, FakeAdapter, publications: [%{routing_key: :dup}])
+          gateway(:b, FakeAdapter, publications: [%{routing_key: :dup}])
+        end
+      end
+    end
+
+    test "raises on duplicated routing keys within one gateway" do
+      assert_raise ArgumentError, ~r/gateways: \[:kafka\]/, fn ->
+        defmodule DuplicateInOneGatewayDispatcher do
+          use Ming.Dispatcher
+
+          gateway(:kafka, FakeAdapter, publications: [%{routing_key: :dup}, %{routing_key: :dup}])
+        end
+      end
+    end
+
+    test "allows distinct routing keys" do
+      defmodule DistinctKeysDispatcher do
+        use Ming.Dispatcher
+
+        gateway(:a, FakeAdapter, publications: [%{routing_key: :one}])
+        gateway(:b, FakeAdapter, publications: [%{routing_key: :two}])
+      end
+
+      assert DistinctKeysDispatcher.__gateways__()[:a].publications == [
+               %{routing_key: :one, gateway_name: :a, mapper: :json, transformers: []}
+             ]
+    end
+  end
+
+  defmodule FakeProducer do
+    @behaviour Ming.Messaging.Producer
+
+    def produce(message, context) do
+      Kernel.send(context.metadata[:test_pid], {:produced, message})
+      :ok
+    end
+  end
+
+  defmodule FakeGatewayAdapter do
+    def producer(_publication), do: FakeProducer
+  end
+
+  defmodule PostDispatcher do
+    use Ming.Dispatcher
+
+    gateway(:fake, FakeGatewayAdapter, publications: [%{routing_key: :created}])
+  end
+
+  describe "post/2" do
+    test "encodes the request and produces it through the gateway" do
+      assert :ok =
+               PostDispatcher.post(%{id: 1}, routing_key: :created, metadata: %{test_pid: self()})
+
+      assert_received {:produced, %Ming.Messaging.Message{payload: payload} = message}
+      assert IO.iodata_to_binary(payload) == ~s({"id":1})
+      assert message.content_type == "application/json"
+    end
+
+    test "returns {:error, :publication_not_found} for unknown routing keys" do
+      assert PostDispatcher.post(%{}, routing_key: :unknown) == {:error, :publication_not_found}
+    end
+  end
 end

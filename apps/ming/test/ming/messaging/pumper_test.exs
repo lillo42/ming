@@ -32,7 +32,7 @@ defmodule Ming.Messaging.PumperTest do
     import Kernel, except: [send: 2]
 
     def send(message, opts) do
-      subscription = opts[:metadata][:subscription]
+      subscription = opts[:metadata][:ming_subscription]
 
       if pid = subscription[:test_pid],
         do: Kernel.send(pid, {:dispatched, message.id, opts[:routing_key]})

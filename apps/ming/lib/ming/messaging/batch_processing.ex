@@ -103,9 +103,9 @@ defmodule Ming.Messaging.BatchProcessing do
       correlation_id: message.correlation_id,
       timeout: timeout,
       metadata: %{
-        original_message: message,
-        subscription: subscription,
-        mapper: subscription[:mapper]
+        ming_original_message: message,
+        ming_subscription: subscription,
+        ming_mapper: subscription[:mapper]
       }
     )
   end

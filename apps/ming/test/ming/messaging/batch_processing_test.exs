@@ -28,7 +28,7 @@ defmodule Ming.Messaging.BatchProcessingTest do
     import Kernel, except: [send: 2]
 
     def send(message, opts) do
-      subscription = opts[:metadata][:subscription]
+      subscription = opts[:metadata][:ming_subscription]
       Kernel.send(subscription[:test_pid], {:dispatched, message.id, opts[:routing_key]})
 
       case subscription[:respond] do

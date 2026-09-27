@@ -9,7 +9,8 @@ defmodule Ming.Messaging.Message do
 
   - `:id` — Unique message identifier.
   - `:correlation_id` — Correlation identifier for tracing requests.
-  - `:payload` — Raw message payload (required).
+  - `:payload` — Raw message payload as iodata (required). Providers that
+    need a binary flatten it with `IO.iodata_to_binary/1` at their boundary.
   - `:routing_key` — Destination routing key (required).
   - `:timestamp` — `%DateTime{}` when the message was created (required).
   - `:content_type` — MIME type of the payload, defaults to `"text/plain"`.
@@ -44,7 +45,7 @@ defmodule Ming.Messaging.Message do
           data_ref: URI.t() | String.t() | nil,
           headers: map(),
           partition_key: String.t() | atom() | nil,
-          payload: binary() | iodata(),
+          payload: iodata(),
           reply_to: URI.t() | String.t() | nil,
           routing_key: Ming.routing_key(),
           source: URI.t() | String.t(),
@@ -72,7 +73,7 @@ defmodule Ming.Messaging.Message do
     :trace_state,
     :trace_parent,
     :timestamp,
-    source: URI.new("ming"),
+    source: URI.new!("ming"),
     type: "ming",
     content_type: "text/plain",
     headers: %{},
