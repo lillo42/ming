@@ -45,7 +45,7 @@ defmodule Ming.Messaging.Message do
           data_ref: URI.t() | String.t() | nil,
           headers: map(),
           partition_key: String.t() | atom() | nil,
-          payload: iodata(),
+          payload: binary() | iodata(),
           reply_to: URI.t() | String.t() | nil,
           routing_key: Ming.routing_key(),
           source: URI.t() | String.t(),
@@ -62,6 +62,7 @@ defmodule Ming.Messaging.Message do
     :id,
     :baggage,
     :content_encoding,
+    :content_type,
     :correlation_id,
     :data_schema,
     :data_ref,
@@ -75,7 +76,6 @@ defmodule Ming.Messaging.Message do
     :timestamp,
     source: URI.new!("ming"),
     type: "ming",
-    content_type: "text/plain",
     headers: %{},
     spec_version: "1.0"
   ]

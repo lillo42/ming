@@ -60,9 +60,14 @@ defmodule Ming.Dispatcher do
       # Internal pipeline backing post/2: encodes the request into a
       # %Ming.Messaging.Message{} and produces it through the gateway.
       routing_key(:ming_post_message,
-        handler: Ming.Messaging.ProduceHandler,
-        middlewares: [{Ming.Messaging.Middleware.Encode, [order: 0]}]
+        handler: Ming.Messaging.Handlers.Producer,
+        middlewares: [
+          {Ming.Messaging.Middleware.Encode, [order: 0]}
+        ]
       )
+
+      transformer(Ming.Messaging.Transformer.ApplyDefaults)
+      transformer(Ming.Messaging.Transformer.StructureCloudEvent)
 
       @doc """
       Resolves the publication for the given routing key from the merged
@@ -213,6 +218,24 @@ defmodule Ming.Dispatcher do
               opts
             )
           end
+
+          defp do_dispatch(unquote(routing_key), :post, opts) do
+            case unquote(Macro.escape(pipelines)) do
+              [pipeline] ->
+                [response] =
+                  run_pipelines(
+                    unquote(routing_key),
+                    [pipeline],
+                    unquote(Macro.escape(key_opts)),
+                    opts
+                  )
+
+                response
+
+              _pipelines ->
+                {:error, :more_than_one_handler_found}
+            end
+          end
         end
       end
 
@@ -333,7 +356,7 @@ defmodule Ming.Dispatcher do
 
             do_dispatch(
               :ming_post_message,
-              :send,
+              :post,
               opts
               |> Keyword.put(:request, request)
               |> Keyword.put(:metadata, metadata)
@@ -348,8 +371,8 @@ defmodule Ming.Dispatcher do
                               Enum.map(pubs, fn pub ->
                                 pub
                                 |> Map.put_new(:gateway_name, name)
-                                |> Map.put_new(:transformers, [])
-                                |> Map.update!(:transformers, fn transformers ->
+                                |> Map.put_new(:mapper, @mapper)
+                                |> Map.update(:transformers, [], fn transformers ->
                                   Enum.sort_by(
                                     transformers ++ Enum.reverse(@transformers),
                                     fn {_module, opts} -> Keyword.get(opts, :order, 1) end
@@ -361,8 +384,8 @@ defmodule Ming.Dispatcher do
                               Enum.map(subs, fn sub ->
                                 sub
                                 |> Map.put_new(:gateway_name, name)
-                                |> Map.put_new(:transformers, [])
-                                |> Map.update!(:transformers, fn transformers ->
+                                |> Map.put_new(:mapper, @mapper)
+                                |> Map.update(:transformers, [], fn transformers ->
                                   Enum.sort_by(
                                     transformers ++ Enum.reverse(@transformers),
                                     fn {_module, opts} -> Keyword.get(opts, :order, 1) end

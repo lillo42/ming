@@ -1,4 +1,4 @@
-defmodule Ming.Messaging.Middleware.Encode do
+defmodule Ming.Messaging.Middleware.Decode do
   @behaviour Ming.Middleware
 
   alias Ming.Context
@@ -6,19 +6,18 @@ defmodule Ming.Messaging.Middleware.Encode do
   alias Ming.Messaging.Message
 
   @impl Ming.Middleware
-  def execute(%Context{request: %Message{}} = context, _args, next) do
-    next.(context)
-  end
-
   def execute(
-        %Context{metadata: %{ming_mapper: mapper, ming_publication: publication}} = context,
+        %Context{
+          request: %Message{},
+          metadata: %{ming_mapper: mapper, ming_subscription: subscription}
+        } = context,
         _args,
         next
       ) do
     context =
       context
-      |> to_message(mapper)
-      |> apply_transformers(Map.get(publication, :transformers, []))
+      |> apply_transformers(Map.get(subscription, :transformers, []))
+      |> to_request(mapper)
 
     case context do
       %Context{response: nil} -> next.(context)
@@ -28,36 +27,29 @@ defmodule Ming.Messaging.Middleware.Encode do
 
   def execute(context, _args, next), do: next.(context)
 
-  defp to_message(%Context{} = context, mapper) do
+  defp to_request(%Context{} = context, mapper) do
     {mapper, opts} = Mapper.resolve(mapper)
 
-    case mapper.to_message(context.request, context, Keyword.get(opts, :args)) do
-      %Message{} = message ->
-        %Context{context | request: message}
-        |> Context.assign(:request, context.request)
+    case mapper.to_request(context.request, context, opts) do
+      {:ok, request} ->
+        %Context{context | request: request}
 
-      {:ok, %Message{} = message} ->
-        %Context{context | request: message}
-        |> Context.assign(:request, context.request)
+      %Context{} = new_context ->
+        new_context
 
       {:error, reason} ->
         context
         |> Context.respond({:error, reason})
 
-      %Context{request: %Message{}} = new_context ->
-        new_context
-        |> Context.assign(:request, context.request)
-
-      %Context{} ->
-        context
-        |> Context.respond({:error, "invalid response"})
+      request ->
+        %Context{context | request: request}
     end
   end
 
   defp apply_transformers(context, []), do: context
 
   defp apply_transformers(%Context{} = context, [{transformer, args} | transformers]) do
-    case transformer.encode(context.request, args, context) do
+    case transformer.decode(context.request, args, context) do
       %Message{} = message ->
         context = %Context{context | request: message}
         apply_transformers(context, transformers)
@@ -73,8 +65,9 @@ defmodule Ming.Messaging.Middleware.Encode do
       %Context{request: %Message{} = _m} = new_context ->
         apply_transformers(new_context, transformers)
 
-      %Context{} = new_context ->
-        new_context
+      %Context{} ->
+        context
+        |> Context.respond({:error, "invalid response"})
     end
   end
 end
