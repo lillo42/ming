@@ -21,7 +21,7 @@ defmodule Ming.Brod.Producer do
       partition(message, publication),
       message.partition_key,
       %{
-        value: message.payload,
+        value: IO.iodata_to_binary(message.payload),
         headers: headers,
         ts: DateTime.to_unix(message.timestamp, :millisecond)
       }
@@ -41,7 +41,7 @@ defmodule Ming.Brod.Producer do
         ce_id: message.id,
         ce_correlationid: message.correlation_id,
         ce_datacontenttype: message.content_type,
-        ce_spec_version: message.spec_version,
+        ce_specversion: message.spec_version,
         ce_source: message.source,
         ce_time: message.timestamp,
         ce_type: message.type
@@ -59,12 +59,13 @@ defmodule Ming.Brod.Producer do
   end
 
   defp put_if_not_nil(map, _key, nil) when is_map(map), do: map
-  defp put_if_not_nil(map, key, value) when is_map(map), do: Map.get(map, key, value)
+  defp put_if_not_nil(map, key, value) when is_map(map), do: Map.put(map, key, value)
 
   defp to_kafka_headers(headers) do
     headers
     |> Map.to_list()
-    |> Enum.map(&{elem(&1, 0), to_binary(elem(&1, 1))})
+    |> Enum.reject(&is_nil(elem(&1, 1)))
+    |> Enum.map(&{to_string(elem(&1, 0)), to_binary(elem(&1, 1))})
   end
 
   defp to_binary(true), do: <<1>>
@@ -72,7 +73,7 @@ defmodule Ming.Brod.Producer do
   defp to_binary(val) when is_binary(val), do: val
   defp to_binary(val) when is_atom(val), do: to_string(val)
   defp to_binary(val) when is_float(val), do: <<val::little-float-64>>
-  defp to_binary(val) when is_integer(val), do: <<val::little-signed>>
+  defp to_binary(val) when is_integer(val), do: <<val::little-signed-64>>
   defp to_binary(%URI{} = val), do: URI.to_string(val)
   defp to_binary(%DateTime{} = val), do: DateTime.to_iso8601(val)
   defp to_binary(val), do: :erlang.term_to_binary(val)

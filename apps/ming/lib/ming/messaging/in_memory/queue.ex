@@ -4,7 +4,10 @@ defmodule Ming.Messaging.InMemory.Queue do
   def start_link(opts), do: GenServer.start_link(__MODULE__, :queue.new(), opts)
 
   @impl true
-  def init(state), do: state
+  def init(state), do: {:ok, state}
+
+  @impl true
+  def handle_info({:push, item}, queue), do: {:noreply, :queue.in(item, queue)}
 
   @impl true
   def handle_cast({:push, item}, queue), do: {:noreply, :queue.in(item, queue)}
@@ -17,7 +20,7 @@ defmodule Ming.Messaging.InMemory.Queue do
   @impl true
   def handle_call({:pop, buffer_size}, _from, queue) do
     {messages, queue} = pop(buffer_size, queue, [])
-    {:reply, messages, queue}
+    {:reply, Enum.reverse(messages), queue}
   end
 
   defp pop(0, queue, acc), do: {acc, queue}

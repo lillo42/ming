@@ -17,7 +17,9 @@ defmodule Ming.Messaging.InMemory.Gateway do
   def init(config) do
     provisioners = get_provisioner(config)
 
-    queues = create(provisioners, [])
+    queues =
+      create(provisioners, [])
+      |> Enum.uniq_by(&Keyword.fetch!(elem(&1, 1), :name))
 
     case validate(queues, provisioners) do
       :ok ->
@@ -70,4 +72,6 @@ defmodule Ming.Messaging.InMemory.Gateway do
         {:error, {:queue_not_found, queue}}
     end
   end
+
+  defp validate(queues, [_provisioner | provisioners]), do: validate(queues, provisioners)
 end
