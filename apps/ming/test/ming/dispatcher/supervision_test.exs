@@ -26,6 +26,33 @@ defmodule Ming.Dispatcher.SupervisionTest do
     routing_key(:dispatcher_supervision_test_key, handler: RelayHandler)
   end
 
+  defmodule DualGatewayDispatcher do
+    use Ming.Dispatcher
+
+    gateway(:first, Ming.Messaging.InMemory.Gateway,
+      publications: [[routing_key: :dispatcher_supervision_test_first]],
+      subscriptions: [
+        [
+          name: :dispatcher_supervision_test_first_sub,
+          routing_key: :dispatcher_supervision_test_first
+        ]
+      ]
+    )
+
+    gateway(:second, Ming.Messaging.InMemory.Gateway,
+      publications: [[routing_key: :dispatcher_supervision_test_second]],
+      subscriptions: [
+        [
+          name: :dispatcher_supervision_test_second_sub,
+          routing_key: :dispatcher_supervision_test_second
+        ]
+      ]
+    )
+
+    routing_key(:dispatcher_supervision_test_first, handler: RelayHandler)
+    routing_key(:dispatcher_supervision_test_second, handler: RelayHandler)
+  end
+
   test "starts the gateway and pumps posted messages to the subscription handler" do
     Process.register(self(), Ming.Dispatcher.SupervisionTest.Relay)
     start_supervised!(SupervisedDispatcher)
@@ -47,5 +74,26 @@ defmodule Ming.Dispatcher.SupervisionTest do
              |> List.keyfind({Ming.Messaging.Pumper, :local, :dispatcher_supervision_test_sub}, 0)
 
     assert Process.alive?(pid)
+  end
+
+  test "supervises two gateways using the same adapter module" do
+    Process.register(self(), Ming.Dispatcher.SupervisionTest.Relay)
+    start_supervised!(DualGatewayDispatcher)
+
+    children = Supervisor.which_children(DualGatewayDispatcher)
+
+    assert {{Ming.Messaging.InMemory.Gateway, :first}, _, :supervisor, _} =
+             List.keyfind(children, {Ming.Messaging.InMemory.Gateway, :first}, 0)
+
+    assert {{Ming.Messaging.InMemory.Gateway, :second}, _, :supervisor, _} =
+             List.keyfind(children, {Ming.Messaging.InMemory.Gateway, :second}, 0)
+
+    assert :ok =
+             DualGatewayDispatcher.post(%{id: 2},
+               routing_key: :dispatcher_supervision_test_second
+             )
+
+    assert_receive {:handled, %Message{} = message}, 1_000
+    assert JSON.decode!(IO.iodata_to_binary(message.payload)) == %{"id" => 2}
   end
 end

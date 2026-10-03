@@ -2,6 +2,10 @@ defmodule Ming.Messaging.InMemory.Producer do
   @moduledoc """
   Publishes messages onto the queue resolved from the publication's
   `:queue` option, defaulting to its `:routing_key`.
+
+  Returns `{:error, {:queue_not_found, queue}}` when the queue process is
+  not running, so `Ming.Dispatcher`'s `post/2` surfaces the failure
+  instead of silently dropping the message.
   """
   @behaviour Ming.Messaging.Producer
 

@@ -5,6 +5,12 @@ defmodule Ming.Messaging.InMemory.Queue do
   Queues are registered locally under the resolved name (see
   `resolve_name/1`) so producers and consumers can reach them by the queue
   name declared in the gateway configuration.
+
+  The queue is unbounded: a producer that outpaces its consumers grows
+  the process memory without backpressure.
+
+  `push/2`, `push/3` and `poll/2` return `{:error, {:queue_not_found, name}}`
+  when no queue process is registered under the resolved name.
   """
   use GenServer
 
@@ -14,14 +20,14 @@ defmodule Ming.Messaging.InMemory.Queue do
   def init(state), do: {:ok, state}
 
   @impl true
-  def handle_info({:push, item}, queue), do: {:noreply, :queue.in(item, queue)}
+  def handle_info({:push, item}, queue), do: {:noreply, enqueue(item, queue)}
 
   @impl true
-  def handle_cast({:push, item}, queue), do: {:noreply, :queue.in(item, queue)}
+  def handle_call({:push, item}, _from, queue), do: {:reply, :ok, enqueue(item, queue)}
 
-  def handle_cast({:push, item, delay}, queue) do
+  def handle_call({:push, item, delay}, _from, queue) do
     Process.send_after(self(), {:push, item}, delay)
-    {:noreply, queue}
+    {:reply, :ok, queue}
   end
 
   @impl true
@@ -29,6 +35,8 @@ defmodule Ming.Messaging.InMemory.Queue do
     {messages, queue} = pop(buffer_size, queue, [])
     {:reply, Enum.reverse(messages), queue}
   end
+
+  defp enqueue(item, queue), do: :queue.in(item, queue)
 
   defp pop(0, queue, acc), do: {acc, queue}
 
@@ -51,9 +59,16 @@ defmodule Ming.Messaging.InMemory.Queue do
   def resolve_name(name) when is_atom(name), do: name
   def resolve_name(name) when is_binary(name), do: String.to_atom(name)
 
-  def push(queue, item), do: GenServer.cast(resolve_name(queue), {:push, item})
+  def push(queue, item), do: request(queue, {:push, item})
 
-  def push(queue, item, delay), do: GenServer.cast(resolve_name(queue), {:push, item, delay})
+  def push(queue, item, delay), do: request(queue, {:push, item, delay})
 
-  def poll(queue, buffer_size), do: GenServer.call(resolve_name(queue), {:pop, buffer_size})
+  def poll(queue, buffer_size), do: request(queue, {:pop, buffer_size})
+
+  defp request(queue, message) do
+    GenServer.call(resolve_name(queue), message)
+  catch
+    :exit, {reason, _} when reason in [:noproc, :normal] ->
+      {:error, {:queue_not_found, queue}}
+  end
 end

@@ -155,7 +155,7 @@ defmodule Ming.Dispatcher do
             )
           end)
 
-        [{adapter, gateway_config} | pumpers]
+        [Supervisor.child_spec({adapter, gateway_config}, id: {adapter, name}) | pumpers]
       end
     end
   end
