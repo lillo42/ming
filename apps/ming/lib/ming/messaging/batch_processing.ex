@@ -35,6 +35,14 @@ defmodule Ming.Messaging.BatchProcessing do
   to the `:on_error` policy — a `(message, error) -> action` function on the
   subscription, defaulting to `{:defer, 5_000}`. If applying that action
   fails, the message is nacked so it is always settled.
+
+  ## Telemetry
+
+  Each processed message emits a `[:ming, :process]` span
+  (`:start`/`:stop`/`:exception` events) with metadata `:subscription`,
+  `:message_id` and `:correlation_id`; the `:stop` event adds the
+  `:outcome` — what the handler settled to before the error policy:
+  `:ack`, `:nack`, `:defer` or `:error`.
   """
 
   alias Ming.Messaging.Message
@@ -71,22 +79,39 @@ defmodule Ming.Messaging.BatchProcessing do
 
     timeout = message_timeout(subscription, deadline)
 
+    metadata = %{
+      subscription: Map.get(subscription, :name),
+      message_id: message.id,
+      correlation_id: message.correlation_id
+    }
+
+    :telemetry.span([:ming, :process], metadata, fn ->
+      {outcome, result} = run(message, args, dispatcher, subscription, timeout)
+      {result, Map.put(metadata, :outcome, outcome)}
+    end)
+  end
+
+  defp run(message, args, dispatcher, subscription, timeout) do
     try do
       message
       |> dispatch(dispatcher, subscription, timeout)
       |> normalize_response()
       |> case do
-        {:error, reason} -> settle_error(message, reason, args)
-        action -> apply_action(action, message, args)
+        {:error, reason} -> {:error, settle_error(message, reason, args)}
+        action -> {outcome(action), apply_action(action, message, args)}
       end
     rescue
-      error in Ming.DeferError -> apply_action({:defer, error.delay}, message, args)
-      _error in Ming.NackError -> apply_action(:nack, message, args)
-      error -> settle_error(message, error, args)
+      error in Ming.DeferError -> {:defer, apply_action({:defer, error.delay}, message, args)}
+      _error in Ming.NackError -> {:nack, apply_action(:nack, message, args)}
+      error -> {:error, settle_error(message, error, args)}
     catch
-      kind, reason -> settle_error(message, {kind, reason}, args)
+      kind, reason -> {:error, settle_error(message, {kind, reason}, args)}
     end
   end
+
+  defp outcome(:ack), do: :ack
+  defp outcome(:nack), do: :nack
+  defp outcome({:defer, _delay}), do: :defer
 
   @doc """
   Computes the deadline for a batch timeout in monotonic milliseconds.

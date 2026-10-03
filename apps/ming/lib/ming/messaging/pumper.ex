@@ -7,6 +7,12 @@ defmodule Ming.Messaging.Pumper do
   the subscription's `:no_message_delay` (default 100ms); on a receive failure
   it logs and waits `:failure_delay` (default 5s); after a successful batch it
   polls again immediately.
+
+  ## Telemetry
+
+  Each poll emits a `[:ming, :poll]` span (`:start`/`:stop`/`:exception`
+  events) with the `:subscription` name in the metadata; the `:stop` event
+  adds `:batch_size`, or `:error` when the receive failed.
   """
   use GenServer, restart: :transient
 
@@ -41,7 +47,7 @@ defmodule Ming.Messaging.Pumper do
   defp poll(state) do
     %{consumer: consumer, subscription: subscription} = state
 
-    case consumer.receive_messages(subscription) do
+    case receive(consumer, subscription) do
       [] ->
         schedule_next(Map.get(subscription, :no_message_delay, 100))
         {:noreply, state}
@@ -69,6 +75,20 @@ defmodule Ming.Messaging.Pumper do
         schedule_next(Map.get(subscription, :failure_delay, 5_000))
         {:noreply, state}
     end
+  end
+
+  defp receive(consumer, subscription) do
+    metadata = %{subscription: Map.get(subscription, :name)}
+
+    :telemetry.span([:ming, :poll], metadata, fn ->
+      case consumer.receive_messages(subscription) do
+        messages when is_list(messages) ->
+          {messages, Map.put(metadata, :batch_size, length(messages))}
+
+        {:error, reason} = error ->
+          {error, Map.put(metadata, :error, reason)}
+      end
+    end)
   end
 
   defp schedule_next(delay) do

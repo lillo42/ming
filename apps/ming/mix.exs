@@ -38,6 +38,8 @@ defmodule Ming.MixProject do
   defp deps do
     [
       # UUID V7
+      {:telemetry, "~> 1.0"},
+      {:telemetry_metrics, "~> 1.2"},
       {:uuid_v7, "~> 0.6.0"}
     ]
   end
