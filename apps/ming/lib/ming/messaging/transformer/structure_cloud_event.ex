@@ -1,4 +1,26 @@
 defmodule Ming.Messaging.Transformer.StructureCloudEvent do
+  @moduledoc """
+  Converts between `%Ming.Messaging.Message{}` and CloudEvents
+  representations.
+
+  The mode is read from the publication's or subscription's
+  `:cloud_events_mode` option:
+
+    * `:binary` (default) — the payload travels unchanged and CloudEvents
+      attributes ride as message attributes, so `encode/3` is a
+      pass-through
+    * `:json` (structured) — `encode/3` packs the attributes and payload
+      into an `application/cloudevents+json` JSON document, emitting the
+      payload as `data_base64` when it is valid base64 and as `data`
+      otherwise; `decode/3` unpacks such documents back into message
+      attributes
+
+  Additional CloudEvents attributes can be injected through the
+  configuration's `:additional_cloud_events_properties` map.
+
+  This transformer is declared by default on every dispatcher with order
+  `1`.
+  """
   @behaviour Ming.Messaging.Transformer
 
   alias Ming.Context

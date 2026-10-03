@@ -1,10 +1,40 @@
 defmodule Ming.Messaging.InMemory.Gateway do
+  @moduledoc """
+  In-memory messaging gateway.
+
+  Routes messages through `Ming.Messaging.InMemory.Queue` processes inside
+  the BEAM, with no external broker. Useful for local development and
+  tests.
+
+  Publications and subscriptions resolve their queue from the `:queue`
+  option, defaulting to their `:routing_key`. A publication and a
+  subscription resolving to the same queue share it, so several
+  subscriptions on the same queue compete for messages. Queue names are
+  registered locally; string names are converted to atoms.
+
+  The `:provisioner` option controls queue startup:
+
+    * `:create` (default) — the queue is started under this gateway
+    * `:validate` — startup fails with `{:error, {:queue_not_found, queue}}`
+      unless another entry of this gateway creates the queue
+    * `:assume` — the queue is left untouched (useful when another gateway
+      in the same VM already creates it)
+
+  Delivery is at-most-once: messages are removed from the queue when
+  polled, so a crash between polling and processing loses them, and nacked
+  messages are discarded.
+  """
   use Supervisor
 
   @behaviour Ming.Messaging.Gateway
 
+  alias Ming.Messaging.InMemory.Queue
+
   def start_link(config) do
-    Supervisor.start_link(__MODULE__, config, name: config.name)
+    case validate(config) do
+      :ok -> Supervisor.start_link(__MODULE__, config, name: config.name)
+      {:error, _reason} = error -> error
+    end
   end
 
   @impl Ming.Messaging.Gateway
@@ -15,63 +45,44 @@ defmodule Ming.Messaging.InMemory.Gateway do
 
   @impl true
   def init(config) do
-    provisioners = get_provisioner(config)
-
     queues =
-      create(provisioners, [])
-      |> Enum.uniq_by(&Keyword.fetch!(elem(&1, 1), :name))
-
-    case validate(queues, provisioners) do
-      :ok ->
-        Supervisor.init(queues, strategy: :one_for_one)
-
-      error ->
-        error
-    end
-  end
-
-  defp get_provisioner(config) do
-    publications =
       config
-      |> Map.get(:publication, [])
-      |> Enum.map(fn item ->
-        provisioner = Map.get(item, :provisioner, :assume)
-        {provisioner, item.queue}
+      |> entries()
+      |> Enum.filter(&(provisioner(&1) == :create))
+      |> Enum.map(&queue_name/1)
+      |> Enum.uniq()
+      |> Enum.map(fn queue ->
+        Supervisor.child_spec({Queue, [name: Queue.resolve_name(queue)]}, id: {Queue, queue})
       end)
 
-    subscription =
-      config
-      |> Map.get(:subscription, [])
-      |> Enum.map(fn item ->
-        provisioner = Map.get(item, :provisioner, :assume)
-        {provisioner, item.queue}
-      end)
-
-    publications ++ subscription
+    Supervisor.init(queues, strategy: :one_for_one)
   end
 
-  defp create([], acc), do: acc
-
-  defp create([{:create, queue} | provisioners], acc) do
-    create(
-      provisioners,
-      [{Ming.Messaging.InMemory.Queue, name: queue} | acc]
-    )
+  defp entries(config) do
+    Map.get(config, :publications, []) ++ Map.get(config, :subscriptions, [])
   end
 
-  defp create([{_provisioner, _queue} | provisioners], acc), do: create(provisioners, acc)
+  defp provisioner(entry), do: Map.get(entry, :provisioner, :create)
 
-  defp validate(_queues, []), do: :ok
+  defp queue_name(entry), do: Map.get(entry, :queue) || Map.fetch!(entry, :routing_key)
 
-  defp validate(queues, [{:validate, queue} | provisioners]) do
-    case Enum.any?(queues, &(Keyword.fetch!(elem(&1, 1), :name) == queue)) do
-      true ->
-        validate(queues, provisioners)
+  defp validate(config) do
+    created =
+      for entry <- entries(config), provisioner(entry) == :create, into: MapSet.new() do
+        queue_name(entry)
+      end
 
-      false ->
-        {:error, {:queue_not_found, queue}}
-    end
+    config
+    |> entries()
+    |> Enum.filter(&(provisioner(&1) == :validate))
+    |> Enum.reduce_while(:ok, fn entry, :ok ->
+      queue = queue_name(entry)
+
+      if MapSet.member?(created, queue) do
+        {:cont, :ok}
+      else
+        {:halt, {:error, {:queue_not_found, queue}}}
+      end
+    end)
   end
-
-  defp validate(queues, [_provisioner | provisioners]), do: validate(queues, provisioners)
 end

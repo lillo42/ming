@@ -1,46 +1,50 @@
 # Gateways
 
-Ming supports messaging gateways for producing and consuming messages through external brokers. Gateways are configured under your command processor module and started automatically by the processor supervisor.
+Ming supports messaging gateways for producing and consuming messages through external brokers. Gateways are declared on a dispatcher with `gateway/3` and started automatically by the dispatcher's own supervision tree.
 
 ## Configuration
 
-Gateway configuration is read from `Application.get_env(:my_app, MyApp.CommandProcessor)[:gateways]`.
-
 ```elixir
-# config/runtime.exs or config/config.exs
-config :my_app, MyApp.CommandProcessor,
-  gateways: [
-    [
-      adapter: Ming.Gateway.InMemory,
-      name: :my_gateway,
-      publications: [
-        [routing_key: :order_created]
-      ],
-      subscriptions: [
-        [name: :orders, routing_key: :order_created]
-      ]
+defmodule MyApp.Dispatcher do
+  use Ming.Dispatcher, otp_app: :my_app
+
+  gateway :my_gateway, Ming.Messaging.InMemory.Gateway,
+    publications: [
+      [routing_key: :order_created]
+    ],
+    subscriptions: [
+      [name: :orders, routing_key: :order_created]
     ]
-  ]
+end
 ```
 
-The `:command_processor` option is injected automatically by `Ming.CommandProcessor` and should not be set manually.
+Add the dispatcher to your application supervision tree to start the declared gateways (and one `Ming.Messaging.Pumper` per subscription):
+
+```elixir
+children = [
+  MyApp.Dispatcher
+]
+```
+
+The compile-time declarations can be overridden per environment through the application environment; see `Ming.Dispatcher` for the merge rules.
 
 ## In-memory gateway
 
-`Ming.Gateway.InMemory` routes messages inside the BEAM with no external infrastructure. It is useful for local development, CI, and testing.
+`Ming.Messaging.InMemory.Gateway` routes messages inside the BEAM with no external infrastructure. It is useful for local development, CI, and testing.
 
 ```elixir
-[
-  adapter: Ming.Gateway.InMemory,
-  name: :local_gateway,
+gateway :local_gateway, Ming.Messaging.InMemory.Gateway,
   publications: [
     [routing_key: :order_created]
   ],
   subscriptions: [
     [name: :orders, routing_key: :order_created]
   ]
-]
 ```
+
+Publications and subscriptions resolve their queue from the `:queue` option, defaulting to their `:routing_key`; entries resolving to the same queue share it. The `:provisioner` option accepts `:create` (default — starts the queue under the gateway), `:validate` (fails startup unless another entry creates the queue), and `:assume` (leaves the queue untouched).
+
+Delivery is at-most-once: messages leave the queue when polled, so nacked messages are discarded and a crash between polling and processing loses the batch.
 
 ## AMQP gateway
 

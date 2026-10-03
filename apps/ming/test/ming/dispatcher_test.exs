@@ -240,6 +240,8 @@ defmodule Ming.DispatcherTest do
       [publication] = GatewayDispatcher.__gateways__()[:kafka].publications
 
       assert publication.transformers == [
+               {Ming.Messaging.Transformer.ApplyDefaults, []},
+               {Ming.Messaging.Transformer.StructureCloudEvent, []},
                {T1, [args: :pub, order: 2]},
                {T2, [order: 5]},
                {T3, [order: 10]}
@@ -247,7 +249,12 @@ defmodule Ming.DispatcherTest do
 
       [subscription] = GatewayDispatcher.__gateways__()[:kafka].subscriptions
 
-      assert subscription.transformers == [{T2, [order: 5]}, {T3, [order: 10]}]
+      assert subscription.transformers == [
+               {Ming.Messaging.Transformer.ApplyDefaults, []},
+               {Ming.Messaging.Transformer.StructureCloudEvent, []},
+               {T2, [order: 5]},
+               {T3, [order: 10]}
+             ]
     end
   end
 
@@ -311,7 +318,15 @@ defmodule Ming.DispatcherTest do
       end
 
       assert DistinctKeysDispatcher.__gateways__()[:a].publications == [
-               %{routing_key: :one, gateway_name: :a, mapper: :json, transformers: []}
+               %{
+                 routing_key: :one,
+                 gateway_name: :a,
+                 mapper: :json,
+                 transformers: [
+                   {Ming.Messaging.Transformer.ApplyDefaults, []},
+                   {Ming.Messaging.Transformer.StructureCloudEvent, []}
+                 ]
+               }
              ]
     end
   end

@@ -1,4 +1,8 @@
 defmodule Ming.Messaging.InMemory.Producer do
+  @moduledoc """
+  Publishes messages onto the queue resolved from the publication's
+  `:queue` option, defaulting to its `:routing_key`.
+  """
   @behaviour Ming.Messaging.Producer
 
   alias Ming.Context
@@ -8,5 +12,5 @@ defmodule Ming.Messaging.InMemory.Producer do
 
   @impl Ming.Messaging.Producer
   def produce(%Message{} = message, %Context{metadata: %{ming_publication: publication}}),
-    do: Queue.push(publication.queue, message)
+    do: Queue.push(publication[:queue] || publication[:routing_key], message)
 end

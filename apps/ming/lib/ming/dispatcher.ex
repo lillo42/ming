@@ -20,6 +20,20 @@ defmodule Ming.Dispatcher do
 
   `post/2` encodes the request with the publication's mapper and produces
   it through the gateway that declares a publication for the routing key.
+
+  ## Supervision
+
+  A dispatcher is also a `Supervisor`: adding it to an application
+  supervision tree starts one child per declared gateway adapter plus one
+  `Ming.Messaging.Pumper` per subscription:
+
+      children = [
+        MyApp.Dispatcher
+      ]
+
+  Gateway adapters must therefore implement `start_link/1` (or
+  `child_spec/1`) accepting their configuration map — which includes the
+  gateway `:name` — in addition to the `Ming.Messaging.Gateway` behaviour.
   """
 
   @doc false
@@ -37,7 +51,9 @@ defmodule Ming.Dispatcher do
       # Dispatchers define their own send/2.
       import Kernel, except: [send: 2]
       import Ming.Registration
-      import Ming.Dispatcher, only: [router: 1, gateway: 3, transformer: 2]
+      import Ming.Dispatcher, only: [router: 1, gateway: 3, transformer: 1, transformer: 2]
+
+      use Supervisor
 
       @before_compile Ming.Dispatcher
 
@@ -60,7 +76,7 @@ defmodule Ming.Dispatcher do
       # Internal pipeline backing post/2: encodes the request into a
       # %Ming.Messaging.Message{} and produces it through the gateway.
       routing_key(:ming_post_message,
-        handler: Ming.Messaging.Handlers.Producer,
+        handler: Ming.Messaging.ProduceHandler,
         middlewares: [
           {Ming.Messaging.Middleware.Encode, [order: 0]}
         ]
@@ -97,6 +113,50 @@ defmodule Ming.Dispatcher do
       end
 
       defoverridable config: 0
+
+      @doc """
+      Starts the dispatcher's supervision tree: one child per declared
+      gateway adapter and one `Ming.Messaging.Pumper` per subscription.
+      """
+      def start_link(opts \\ []) do
+        Supervisor.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
+      end
+
+      @impl true
+      def init(_opts) do
+        children =
+          config()
+          |> Keyword.get(:gateways, [])
+          |> Enum.flat_map(&gateway_children/1)
+
+        Supervisor.init(children, strategy: :one_for_one)
+      end
+
+      defp gateway_children({name, gateway}) do
+        adapter =
+          Map.get(gateway, :adapter) ||
+            raise ArgumentError, "gateway #{inspect(name)} does not declare an :adapter"
+
+        gateway_config =
+          gateway
+          |> Map.delete(:adapter)
+          |> Map.put(:name, name)
+
+        pumpers =
+          gateway
+          |> Map.get(:subscriptions, [])
+          |> Enum.map(fn subscription ->
+            Supervisor.child_spec(
+              {Ming.Messaging.Pumper,
+               consumer: adapter.consumer(subscription),
+               subscription: subscription,
+               dispatcher: __MODULE__},
+              id: {Ming.Messaging.Pumper, name, subscription[:name]}
+            )
+          end)
+
+        [{adapter, gateway_config} | pumpers]
+      end
     end
   end
 
@@ -146,6 +206,7 @@ defmodule Ming.Dispatcher do
         |> Map.update(:publications, [], fn pubs ->
           Enum.map(pubs, fn pub ->
             pub
+            |> Map.new()
             |> Map.put(:gateway_name, unquote(name))
             |> Map.put_new(:mapper, mapper)
           end)
@@ -153,6 +214,7 @@ defmodule Ming.Dispatcher do
         |> Map.update(:subscriptions, [], fn subs ->
           Enum.map(subs, fn sub ->
             sub
+            |> Map.new()
             |> Map.put(:gateway_name, unquote(name))
             |> Map.put_new(:batch_processing, batch_processing)
             |> Map.put_new(:mapper, mapper)
@@ -364,43 +426,45 @@ defmodule Ming.Dispatcher do
         end
       end
 
-      @resolved_gateways Enum.map(Enum.reverse(@gateways), fn {name, config} ->
-                           {name,
-                            config
-                            |> Map.update(:publications, [], fn pubs ->
-                              Enum.map(pubs, fn pub ->
-                                pub
-                                |> Map.put_new(:gateway_name, name)
-                                |> Map.put_new(:mapper, @mapper)
-                                |> Map.update(:transformers, [], fn transformers ->
-                                  Enum.sort_by(
-                                    transformers ++ Enum.reverse(@transformers),
-                                    fn {_module, opts} -> Keyword.get(opts, :order, 1) end
-                                  )
-                                end)
-                              end)
-                            end)
-                            |> Map.update(:subscriptions, [], fn subs ->
-                              Enum.map(subs, fn sub ->
-                                sub
-                                |> Map.put_new(:gateway_name, name)
-                                |> Map.put_new(:mapper, @mapper)
-                                |> Map.update(:transformers, [], fn transformers ->
-                                  Enum.sort_by(
-                                    transformers ++ Enum.reverse(@transformers),
-                                    fn {_module, opts} -> Keyword.get(opts, :order, 1) end
-                                  )
-                                end)
-                              end)
-                            end)}
-                         end)
-
       @doc """
       Returns the compile-time resolved gateway configuration, without
       application environment overrides. Use `config/0` for the merged view.
       """
-      def __gateways__, do: @resolved_gateways
+      def __gateways__ do
+        Ming.Dispatcher.resolve_gateways(
+          Enum.reverse(@gateways),
+          @mapper,
+          Enum.reverse(@transformers)
+        )
+      end
     end
+  end
+
+  @doc false
+  def resolve_gateways(gateways, mapper, transformers) do
+    Enum.map(gateways, fn {name, config} ->
+      {name,
+       config
+       |> Map.update(:publications, [], fn pubs ->
+         Enum.map(pubs, &resolve_gateway_entry(&1, name, mapper, transformers))
+       end)
+       |> Map.update(:subscriptions, [], fn subs ->
+         Enum.map(subs, &resolve_gateway_entry(&1, name, mapper, transformers))
+       end)}
+    end)
+  end
+
+  defp resolve_gateway_entry(entry, name, mapper, transformers) do
+    merged =
+      Enum.sort_by(
+        Map.get(entry, :transformers, []) ++ transformers,
+        fn {_module, opts} -> Keyword.get(opts, :order, 1) end
+      )
+
+    entry
+    |> Map.put_new(:gateway_name, name)
+    |> Map.put_new(:mapper, mapper)
+    |> Map.put(:transformers, merged)
   end
 
   defp validate_unique_publications!(gateways) do

@@ -1,4 +1,11 @@
 defmodule Ming.Messaging.InMemory.Queue do
+  @moduledoc """
+  A named FIFO queue process backing the in-memory gateway.
+
+  Queues are registered locally under the resolved name (see
+  `resolve_name/1`) so producers and consumers can reach them by the queue
+  name declared in the gateway configuration.
+  """
   use GenServer
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, :queue.new(), opts)
@@ -35,8 +42,18 @@ defmodule Ming.Messaging.InMemory.Queue do
     end
   end
 
-  def push(queue, item), do: GenServer.cast(queue, {:push, item})
-  def push(queue, item, delay), do: GenServer.cast(queue, {:push, item, delay})
+  @doc """
+  Resolves a configured queue name into a locally registered process name.
 
-  def poll(queue, buffer_size), do: GenServer.call(queue, {:pop, buffer_size})
+  Atom names are used as-is; string names are converted to atoms, so they
+  should come from static configuration rather than user input.
+  """
+  def resolve_name(name) when is_atom(name), do: name
+  def resolve_name(name) when is_binary(name), do: String.to_atom(name)
+
+  def push(queue, item), do: GenServer.cast(resolve_name(queue), {:push, item})
+
+  def push(queue, item, delay), do: GenServer.cast(resolve_name(queue), {:push, item, delay})
+
+  def poll(queue, buffer_size), do: GenServer.call(resolve_name(queue), {:pop, buffer_size})
 end

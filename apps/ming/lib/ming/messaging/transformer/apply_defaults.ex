@@ -1,4 +1,18 @@
 defmodule Ming.Messaging.Transformer.ApplyDefaults do
+  @moduledoc """
+  Fills in unset `%Ming.Messaging.Message{}` attributes from the
+  publication (on encode) or subscription (on decode) configuration.
+
+  Each message attribute falls back to a `:default_*` key of the
+  configuration — e.g. `:default_content_type`, `:default_source`,
+  `:default_type`, `:default_spec_version`, `:default_subject`,
+  `:default_data_schema`, `:default_data_ref`, `:default_reply_to` and
+  `:default_content_encoding` — while `:default_headers` are merged under
+  the message's own headers.
+
+  This transformer is declared by default on every dispatcher with order
+  `1`.
+  """
   @behaviour Ming.Messaging.Transformer
 
   alias Ming.Context

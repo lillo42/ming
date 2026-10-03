@@ -1,4 +1,17 @@
 defmodule Ming.Messaging.Transformer.ZipCompression do
+  @moduledoc """
+  Compresses the message payload with zlib on encode and decompresses it
+  on decode, marking `content_encoding` as `"zip"`.
+
+  ## Options
+
+    * `:should_compress` — a `(Ming.Messaging.Message.t() -> boolean())`
+      deciding whether to compress on encode; defaults to always
+      compressing
+    * `:should_uncompress` — a `(Ming.Messaging.Message.t() -> boolean())`
+      deciding whether to decompress on decode; defaults to messages
+      whose `content_encoding` is `"zip"`
+  """
   @behaviour Ming.Messaging.Transformer
 
   alias Ming.Context

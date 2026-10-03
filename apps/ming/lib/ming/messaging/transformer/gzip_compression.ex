@@ -1,4 +1,17 @@
 defmodule Ming.Messaging.Transformer.GzipCompression do
+  @moduledoc """
+  Compresses the message payload with gzip on encode and decompresses it
+  on decode, marking `content_encoding` as `"gz"`.
+
+  ## Options
+
+    * `:should_compress` — a `(Ming.Messaging.Message.t() -> boolean())`
+      deciding whether to compress on encode; defaults to always
+      compressing
+    * `:should_uncompress` — a `(Ming.Messaging.Message.t() -> boolean())`
+      deciding whether to decompress on decode; defaults to messages
+      whose `content_encoding` is `"gz"`
+  """
   @behaviour Ming.Messaging.Transformer
 
   alias Ming.Context
