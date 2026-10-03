@@ -42,6 +42,7 @@ defmodule Ming.Umbrella.MixProject do
         "guides/command_processor.md",
         "guides/gateways.md",
         "guides/middleware.md",
+        "guides/telemetry.md",
         "CHANGELOG.md"
       ],
       groups_for_extras: [
@@ -49,7 +50,8 @@ defmodule Ming.Umbrella.MixProject do
           "guides/getting_started.md",
           "guides/command_processor.md",
           "guides/gateways.md",
-          "guides/middleware.md"
+          "guides/middleware.md",
+          "guides/telemetry.md"
         ]
       ]
     ]

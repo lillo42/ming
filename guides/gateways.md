@@ -42,7 +42,7 @@ gateway :local_gateway, Ming.Messaging.InMemory.Gateway,
   ]
 ```
 
-Publications and subscriptions resolve their queue from the `:queue` option, defaulting to their `:routing_key`; entries resolving to the same queue share it. The `:provisioner` option accepts `:create` (default — starts the queue under the gateway), `:validate` (fails startup unless another entry creates the queue), and `:assume` (leaves the queue untouched).
+Publications and subscriptions resolve their queue from the `:queue` option, defaulting to their `:routing_key`; entries resolving to the same queue share it. The `:provisioner` option accepts `:create` (default — starts the queue under the gateway), `:validate` (fails startup unless another entry creates the queue), and `:assume` (leaves the queue untouched). Subscriptions may also set `:buffer_size` (messages per poll, default `10`) and `:number_of_consumers` (competing consumers on the queue, default `1`).
 
 Delivery is at-most-once: messages leave the queue when polled, so nacked messages are discarded and a crash between polling and processing loses the batch.
 
