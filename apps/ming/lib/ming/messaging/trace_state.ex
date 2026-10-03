@@ -23,6 +23,9 @@ defmodule Ming.Messaging.TraceState do
   # value) may not be a trailing space.
   @value_pattern ~r/^[\x20-\x2B\x2D-\x3C\x3E-\x7E]{0,255}[\x21-\x2B\x2D-\x3C\x3E-\x7E]$/
 
+  @doc """
+  Formats a tracestate map as a comma-separated `key=value` header value.
+  """
   def to_string(map) when is_map(map) do
     map
     |> Map.to_list()
@@ -33,6 +36,12 @@ defmodule Ming.Messaging.TraceState do
 
   def to_string(val), do: Kernel.to_string(val)
 
+  @doc """
+  Parses a `tracestate` header value into a map.
+
+  Returns `nil` for `nil`, an empty string, or an invalid header (a
+  warning is logged in the invalid case).
+  """
   def from_string(nil), do: nil
   def from_string(""), do: nil
 

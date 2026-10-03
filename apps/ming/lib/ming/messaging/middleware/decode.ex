@@ -1,4 +1,16 @@
 defmodule Ming.Messaging.Middleware.Decode do
+  @moduledoc """
+  Decodes a consumed `%Ming.Messaging.Message{}` back into a request.
+
+  Applies the subscription's transformers in order, then maps the message
+  to a request with the mapper from the context metadata (`:ming_mapper`).
+  Runs on the consume pipeline driven by `Ming.Messaging.Pumper` and
+  `Ming.Messaging.BatchProcessing`.
+
+  Contexts whose request is not a `%Ming.Messaging.Message{}`, or that
+  lack `:ming_mapper` and `:ming_subscription` metadata, pass through
+  untouched.
+  """
   @behaviour Ming.Middleware
 
   alias Ming.Context

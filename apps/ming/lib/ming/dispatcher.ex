@@ -190,7 +190,7 @@ defmodule Ming.Dispatcher do
   Publications and subscriptions inherit the dispatcher's `:mapper` and
   `:batch_processing` defaults unless overridden per gateway or per entry.
   The same gateway can be overridden at runtime through the application
-  environment (see `c:config/0`).
+  environment (see the `config/0` function generated on the dispatcher).
   """
   defmacro gateway(name, adapter, opts) do
     quote generated: true do

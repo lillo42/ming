@@ -1,4 +1,16 @@
 defmodule Ming.Messaging.Middleware.Encode do
+  @moduledoc """
+  Encodes the pipeline request into a `%Ming.Messaging.Message{}`.
+
+  Maps the request to a message with the mapper from the context metadata
+  (`:ming_mapper`), then applies the publication's transformers in order.
+  Backs the `:ming_post_message` pipeline used when a request is posted
+  through the dispatcher.
+
+  Requests that already are a `%Ming.Messaging.Message{}`, and contexts
+  without `:ming_mapper` and `:ming_publication` metadata, pass through
+  untouched.
+  """
   @behaviour Ming.Middleware
 
   alias Ming.Context

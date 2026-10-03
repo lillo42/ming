@@ -1,4 +1,19 @@
 defmodule Ming.Dispatcher.Config do
+  @moduledoc """
+  Merges dispatcher configuration from `use Ming.Dispatcher` with
+  application environment overrides.
+
+  Keys merge plainly, except `:gateways`: gateways merge by name and,
+  inside a gateway, `:publications` merge by `:routing_key` and
+  `:subscriptions` by `:name`. An override replaces only the keys it sets
+  on the matched entry, and base entries with no matching override are
+  kept.
+  """
+
+  @doc """
+  Merges the `overrides` keyword into the `default` dispatcher
+  configuration.
+  """
   def merge(default, overrides) do
     Keyword.merge(default, overrides, fn
       :gateways, base, extra -> merge_gateways(base, extra)
