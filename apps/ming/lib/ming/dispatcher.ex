@@ -31,6 +31,9 @@ defmodule Ming.Dispatcher do
         MyApp.Dispatcher
       ]
 
+  A subscription may set `:number_of_consumers` (default `1`) to start
+  that many competing consumers — one pumper each — polling its queue.
+
   Gateway adapters must therefore implement `start_link/1` (or
   `child_spec/1`) accepting their configuration map — which includes the
   gateway `:name` — in addition to the `Ming.Messaging.Gateway` behaviour.
@@ -145,17 +148,32 @@ defmodule Ming.Dispatcher do
         pumpers =
           gateway
           |> Map.get(:subscriptions, [])
-          |> Enum.map(fn subscription ->
-            Supervisor.child_spec(
-              {Ming.Messaging.Pumper,
-               consumer: adapter.consumer(subscription),
-               subscription: subscription,
-               dispatcher: __MODULE__},
-              id: {Ming.Messaging.Pumper, name, subscription[:name]}
-            )
+          |> Enum.flat_map(fn subscription ->
+            consumer = adapter.consumer(subscription)
+
+            for index <- 1..number_of_consumers(name, subscription) do
+              Supervisor.child_spec(
+                {Ming.Messaging.Pumper,
+                 consumer: consumer, subscription: subscription, dispatcher: __MODULE__},
+                id: {Ming.Messaging.Pumper, name, subscription[:name], index}
+              )
+            end
           end)
 
         [Supervisor.child_spec({adapter, gateway_config}, id: {adapter, name}) | pumpers]
+      end
+
+      defp number_of_consumers(gateway_name, subscription) do
+        case Map.get(subscription, :number_of_consumers, 1) do
+          count when is_integer(count) and count >= 1 ->
+            count
+
+          count ->
+            raise ArgumentError,
+                  "subscription #{inspect(subscription[:name])} of gateway " <>
+                    "#{inspect(gateway_name)} expects :number_of_consumers to be a " <>
+                    "positive integer, got: #{inspect(count)}"
+        end
       end
     end
   end

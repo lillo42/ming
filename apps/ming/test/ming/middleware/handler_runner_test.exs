@@ -12,6 +12,9 @@ defmodule Ming.Middleware.HandlerRunnerTest do
     def handle(:ok_tuple, _context), do: {:ok, 1}
     def handle(:error_tuple, _context), do: {:error, :bad}
     def handle(:context, context), do: Context.respond(context, :from_context)
+    def handle(:ack, _context), do: :ack
+    def handle(:nack, _context), do: :nack
+    def handle(:defer, _context), do: {:defer, 1_000}
     def handle(:other, _context), do: 42
   end
 
@@ -36,6 +39,12 @@ defmodule Ming.Middleware.HandlerRunnerTest do
 
   test "accepts a context returned by the handler" do
     assert Context.response(run(:context)) == :from_context
+  end
+
+  test "passes message-settlement actions through unwrapped" do
+    assert Context.response(run(:ack)) == :ack
+    assert Context.response(run(:nack)) == :nack
+    assert Context.response(run(:defer)) == {:defer, 1_000}
   end
 
   test "wraps any other value in {:ok, value}" do

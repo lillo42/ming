@@ -44,6 +44,41 @@ defmodule Ming.Messaging.InMemory.ConsumerTest do
     assert Consumer.nack(%{}, :message) == :ok
   end
 
+  test "acked messages are not redelivered" do
+    start_supervised!({Queue, name: :consumer_test_ack})
+
+    Queue.push(:consumer_test_ack, :one)
+
+    subscription = %{routing_key: :consumer_test_ack}
+    assert Consumer.receive_messages(subscription) == [:one]
+    assert :ok = Consumer.ack(subscription, :one)
+    assert Consumer.receive_messages(subscription) == []
+  end
+
+  test "nacked messages are not redelivered" do
+    start_supervised!({Queue, name: :consumer_test_nack})
+
+    Queue.push(:consumer_test_nack, :one)
+
+    subscription = %{routing_key: :consumer_test_nack}
+    assert Consumer.receive_messages(subscription) == [:one]
+    assert :ok = Consumer.nack(subscription, :one)
+    assert Consumer.receive_messages(subscription) == []
+  end
+
+  test "subscriptions sharing a queue compete for messages" do
+    start_supervised!({Queue, name: :consumer_test_competing})
+
+    Queue.push(:consumer_test_competing, :one)
+
+    first = %{name: :first, routing_key: :consumer_test_competing}
+    second = %{name: :second, routing_key: :consumer_test_competing}
+
+    results = [Consumer.receive_messages(first), Consumer.receive_messages(second)]
+
+    assert Enum.sort(results) == [[], [:one]]
+  end
+
   test "defer with delay 0 re-enqueues immediately" do
     start_supervised!({Queue, name: :consumer_test_defer_now})
 

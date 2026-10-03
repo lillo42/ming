@@ -12,7 +12,8 @@ defmodule Ming.Handler do
   Handles the request.
 
   The return value is normalized by `Ming.Middleware.HandlerRunner` into the
-  context response: `:ok`, `nil`, `{:ok, value}`, `{:error, reason}`, a
+  context response: `:ok`, `nil`, `{:ok, value}`, `{:error, reason}`, the
+  message-settlement actions `:ack` / `:nack` / `{:defer, delay}`, a
   `%Ming.Context{}`, or any other value (wrapped in `{:ok, value}`).
   """
   @callback handle(request :: any(), context :: Context.t()) :: Ming.resp()

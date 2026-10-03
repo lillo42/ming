@@ -53,4 +53,25 @@ defmodule Ming.Messaging.InMemory.QueueTest do
     assert :ok = Queue.push("queue_test.string", :item)
     assert Queue.poll("queue_test.string", 10) == [:item]
   end
+
+  test "concurrent producers do not fail or lose messages" do
+    start_supervised!({Queue, name: :queue_test_concurrent})
+
+    results =
+      1..10
+      |> Task.async_stream(
+        fn producer ->
+          for item <- 1..20, do: Queue.push(:queue_test_concurrent, {producer, item})
+        end,
+        max_concurrency: 10
+      )
+      |> Enum.to_list()
+
+    for {:ok, pushes} <- results, do: assert(Enum.all?(pushes, &(&1 == :ok)))
+
+    received = for _ <- 1..4, item <- Queue.poll(:queue_test_concurrent, 50), do: item
+
+    assert length(received) == 200
+    assert Queue.poll(:queue_test_concurrent, 50) == []
+  end
 end

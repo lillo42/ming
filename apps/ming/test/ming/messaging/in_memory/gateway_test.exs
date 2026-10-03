@@ -87,4 +87,33 @@ defmodule Ming.Messaging.InMemory.GatewayTest do
 
     assert Process.whereis(:in_memory_gateway_test_created)
   end
+
+  test "raises when an entry has neither :queue nor :routing_key" do
+    assert_raise ArgumentError, ~r/without :queue or :routing_key/, fn ->
+      Gateway.start_link(%{
+        name: :in_memory_gateway_test_no_key,
+        publications: [%{name: :broken}]
+      })
+    end
+  end
+
+  test "raises on an empty queue name" do
+    assert_raise ArgumentError, ~r/empty queue name/, fn ->
+      Gateway.start_link(%{
+        name: :in_memory_gateway_test_empty_name,
+        publications: [%{queue: ""}]
+      })
+    end
+  end
+
+  test "raises on a non-positive :buffer_size" do
+    for size <- [0, -1, 1.5, "10"] do
+      assert_raise ArgumentError, ~r/:buffer_size/, fn ->
+        Gateway.start_link(%{
+          name: :in_memory_gateway_test_bad_buffer,
+          subscriptions: [%{name: :sub, routing_key: :key, buffer_size: size}]
+        })
+      end
+    end
+  end
 end

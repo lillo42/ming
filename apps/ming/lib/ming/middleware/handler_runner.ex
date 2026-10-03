@@ -7,6 +7,8 @@ defmodule Ming.Middleware.HandlerRunner do
     * `:ok` stays `:ok`
     * `nil` becomes `{:ok, nil}`
     * `{:ok, value}` / `{:error, reason}` pass through
+    * `:ack`, `:nack` and `{:defer, delay}` pass through, settling consumed
+      messages (see `Ming.Messaging.BatchProcessing`)
     * a `%Ming.Context{}` is used as the new context
     * any other value becomes `{:ok, value}`
 
@@ -27,6 +29,8 @@ defmodule Ming.Middleware.HandlerRunner do
       nil -> Context.respond(context, {:ok, nil})
       {:ok, resp} -> Context.respond(context, {:ok, resp})
       {:error, reason} -> Context.respond(context, {:error, reason})
+      action when action in [:ack, :nack] -> Context.respond(context, action)
+      {:defer, delay} -> Context.respond(context, {:defer, delay})
       resp -> Context.respond(context, {:ok, resp})
     end
   end
