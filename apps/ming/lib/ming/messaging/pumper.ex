@@ -49,7 +49,7 @@ defmodule Ming.Messaging.Pumper do
 
     case receive(consumer, subscription) do
       [] ->
-        schedule_next(Map.get(subscription, :no_message_delay, 100))
+        schedule_next(Map.get(subscription, :no_message_delay, 1))
         {:noreply, state}
 
       messages when is_list(messages) ->

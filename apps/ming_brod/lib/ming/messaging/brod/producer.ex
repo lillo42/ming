@@ -1,8 +1,26 @@
-defmodule Ming.Brod.Producer do
+defmodule Ming.Messaging.Brod.Producer do
+  @moduledoc """
+  Publishes messages to Kafka through the gateway's `:brod` client.
+
+  The client is resolved from the publication's `:gateway_name` (the
+  gateway that declared the publication), the topic from `:topic`
+  (defaulting to the routing key as a string). The partition is chosen
+  by `:partition` (default `:hash`) when the message has a partition key,
+  or `:partition_on_nil_key` (default `:random`) otherwise.
+
+  `:produce_mode` controls delivery acknowledgement: `:sync` (default)
+  blocks until Kafka acks the write and returns `{:error, reason}` on
+  failure; `:async` is fire-and-forget and only reports local errors.
+
+  CloudEvents attributes are written as Kafka headers in binary content
+  mode (`ce_*` headers); see `Ming.Messaging.Brod.Decoder` for the
+  reverse mapping.
+  """
   @behaviour Ming.Messaging.Producer
 
   alias Ming.Context
   alias Ming.Messaging.Baggage
+  alias Ming.Messaging.Brod
   alias Ming.Messaging.Message
   alias Ming.Messaging.TraceState
 
@@ -11,24 +29,33 @@ defmodule Ming.Brod.Producer do
         %Message{} = message,
         %Context{metadata: %{ming_publication: publication}}
       ) do
-    headers =
-      set_cloud_events_headers(message)
-      |> to_kafka_headers()
+    client = Map.fetch!(publication, :gateway_name)
+    topic = Brod.topic(publication)
+    partition = partition(message, publication)
+    key = kafka_key(message)
 
-    :brod.produce(
-      publication.name,
-      publication.topic,
-      partition(message, publication),
-      message.partition_key,
-      %{
-        value: IO.iodata_to_binary(message.payload),
-        headers: headers,
-        ts: DateTime.to_unix(message.timestamp, :millisecond)
-      }
-    )
+    value = %{
+      key: key,
+      value: IO.iodata_to_binary(message.payload),
+      headers: message |> set_cloud_events_headers() |> to_kafka_headers(),
+      ts: DateTime.to_unix(message.timestamp, :millisecond)
+    }
 
-    :ok
+    case Map.get(publication, :produce_mode, :sync) do
+      :sync ->
+        :brod.produce_sync(client, topic, partition, key, value)
+
+      :async ->
+        case :brod.produce(client, topic, partition, key, value) do
+          {:ok, _call_ref} -> :ok
+          {:error, _reason} = error -> error
+        end
+    end
   end
+
+  defp kafka_key(%Message{partition_key: nil}), do: ""
+  defp kafka_key(%Message{partition_key: key}) when is_binary(key), do: key
+  defp kafka_key(%Message{partition_key: key}), do: to_string(key)
 
   defp partition(%Message{partition_key: nil}, publication),
     do: Map.get(publication, :partition_on_nil_key, :random)
