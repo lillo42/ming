@@ -133,17 +133,15 @@ defmodule Ming.Dispatcher.SupervisionTest do
     assert JSON.decode!(IO.iodata_to_binary(message.payload)) == %{"id" => 1}
   end
 
-  test "supervises one pumper per subscription" do
+  test "supervises one processor per subscription" do
     start_supervised!(SupervisedDispatcher)
 
-    assert {{Ming.Messaging.Pumper, :local, :dispatcher_supervision_test_sub, 1}, pid, :worker,
-            [Ming.Messaging.Pumper]} =
+    name = Ming.Messaging.Processor.child_name(:local, :dispatcher_supervision_test_sub, 1)
+
+    assert {^name, pid, :worker, [Ming.Messaging.Processor]} =
              SupervisedDispatcher
              |> Supervisor.which_children()
-             |> List.keyfind(
-               {Ming.Messaging.Pumper, :local, :dispatcher_supervision_test_sub, 1},
-               0
-             )
+             |> List.keyfind(name, 0)
 
     assert Process.alive?(pid)
   end
@@ -169,14 +167,16 @@ defmodule Ming.Dispatcher.SupervisionTest do
     assert JSON.decode!(IO.iodata_to_binary(message.payload)) == %{"id" => 2}
   end
 
-  test "starts number_of_consumers pumpers per subscription" do
+  test "starts number_of_consumers processors per subscription" do
     start_supervised!(MultiConsumerDispatcher)
 
     children = Supervisor.which_children(MultiConsumerDispatcher)
 
     for index <- 1..3 do
-      id = {Ming.Messaging.Pumper, :local, :dispatcher_supervision_test_multi_sub, index}
-      assert {^id, pid, :worker, [Ming.Messaging.Pumper]} = List.keyfind(children, id, 0)
+      name =
+        Ming.Messaging.Processor.child_name(:local, :dispatcher_supervision_test_multi_sub, index)
+
+      assert {^name, pid, :worker, [Ming.Messaging.Processor]} = List.keyfind(children, name, 0)
       assert Process.alive?(pid)
     end
   end

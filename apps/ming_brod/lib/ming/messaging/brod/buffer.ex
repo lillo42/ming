@@ -1,7 +1,8 @@
 defmodule Ming.Messaging.Brod.Buffer do
   @moduledoc """
-  Per-subscription buffer between the `:brod` group subscriber (push) and
-  the `Ming.Messaging.Pumper` (pull).
+  Per-subscription buffer between the `:brod` group subscriber (push)
+  and the `Ming.Messaging.Brod.Consumer`, which drains it into the
+  subscription's `Ming.Messaging.Processor`.
 
   Messages pushed by subscriber workers are held in a FIFO queue until a
   consumer takes them. `take/3` blocks — the caller is held by the

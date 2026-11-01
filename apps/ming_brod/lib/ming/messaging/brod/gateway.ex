@@ -3,9 +3,12 @@ defmodule Ming.Messaging.Brod.Gateway do
   Kafka (brod) messaging gateway.
 
   Starts one `:brod` client (named after the gateway) and, per
-  subscription, a `Ming.Messaging.Brod.Buffer` and a
-  `:brod_group_subscriber_v2` that feeds it. See `Ming.Messaging.Brod`
-  for the configuration options and delivery semantics.
+  subscription, a `Ming.Messaging.Brod.Buffer`, a
+  `:brod_group_subscriber_v2` that feeds it, and one
+  `Ming.Messaging.Brod.Consumer` per subscription consumer that drains
+  the buffer into the matching `Ming.Messaging.Processor` started by the
+  dispatcher. See `Ming.Messaging.Brod` for the configuration options
+  and delivery semantics.
 
   ## Topic provisioning
 
@@ -40,6 +43,7 @@ defmodule Ming.Messaging.Brod.Gateway do
 
   alias Ming.Messaging.Brod
   alias Ming.Messaging.Brod.Buffer
+  alias Ming.Messaging.Brod.Consumer
 
   @provisioner_rank %{assume: 0, validate: 1, create: 2}
 
@@ -80,7 +84,8 @@ defmodule Ming.Messaging.Brod.Gateway do
   end
 
   defp subscription_children(config, subscription, client_name) do
-    buffer_name = Brod.buffer_name(Map.put(subscription, :gateway_name, config.name))
+    subscription = Map.put(subscription, :gateway_name, config.name)
+    buffer_name = Brod.buffer_name(subscription)
 
     buffer = %{
       id: {Buffer, buffer_name},
@@ -94,7 +99,33 @@ defmodule Ming.Messaging.Brod.Gateway do
          [subscriber_config(config, subscription, client_name, buffer_name)]}
     }
 
-    [buffer, subscriber]
+    [buffer, subscriber] ++ consumer_children(config, subscription, buffer_name)
+  end
+
+  defp consumer_children(config, subscription, buffer_name) do
+    count = Map.get(subscription, :number_of_consumers, 1)
+    indices = if is_integer(count) and count >= 1, do: 1..count, else: []
+
+    for index <- indices do
+      consumer_name = Brod.consumer_name(subscription, index)
+
+      processor_name =
+        Ming.Messaging.Processor.child_name(config.name, subscription[:name], index)
+
+      %{
+        id: {:consumer, consumer_name},
+        start:
+          {Consumer, :start_link,
+           [
+             [
+               name: consumer_name,
+               buffer: buffer_name,
+               processor: processor_name,
+               subscription: subscription
+             ]
+           ]}
+      }
+    end
   end
 
   defp subscriber_config(_config, subscription, client_name, buffer_name) do

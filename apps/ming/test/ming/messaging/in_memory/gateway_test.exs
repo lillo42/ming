@@ -15,8 +15,8 @@ defmodule Ming.Messaging.InMemory.GatewayTest do
     )
 
     Queue.push(:in_memory_gateway_test_key, :hello)
-    assert Queue.poll(:in_memory_gateway_test_key, 10) == [:hello]
-    assert Queue.poll(:in_memory_gateway_test_key, 10) == []
+    assert Queue.take(:in_memory_gateway_test_key, 10) == [:hello]
+    assert Queue.take(:in_memory_gateway_test_key, 10) == []
   end
 
   test "resolves the queue from the :queue option over the routing key" do
@@ -44,7 +44,7 @@ defmodule Ming.Messaging.InMemory.GatewayTest do
     )
 
     Queue.push("in_memory_gateway_test.string", :hello)
-    assert Queue.poll("in_memory_gateway_test.string", 10) == [:hello]
+    assert Queue.take("in_memory_gateway_test.string", 10) == [:hello]
   end
 
   test "starts no queue for :assume entries" do

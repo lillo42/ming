@@ -3,10 +3,11 @@ defmodule Ming.Messaging.Consumer do
   Behaviour for consuming `%Ming.Messaging.Message{}` structs from a
   transport.
 
-  A `Ming.Messaging.Pumper` polls `receive_messages/1` and, after each
-  message is dispatched, settles it through `ack/2`, `nack/2` or
-  `defer/3` according to the handler result (see
-  `Ming.Messaging.BatchProcessing` for the settlement rules).
+  Batches of consumed messages are dispatched through the dispatcher's
+  consume pipeline by `Ming.Messaging.Processor` and, after each message
+  is processed, settled through `ack/2`, `nack/2` or `defer/3` according
+  to the handler result (see `Ming.Messaging.BatchProcessing` for the
+  settlement rules).
   """
 
   alias Ming.Messaging.Message

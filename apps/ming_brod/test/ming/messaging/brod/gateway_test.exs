@@ -1,6 +1,7 @@
 defmodule Ming.Messaging.Brod.GatewayTest do
   use ExUnit.Case, async: false
 
+  alias Ming.Messaging.Brod
   alias Ming.Messaging.Brod.Gateway
 
   defp config(overrides) do
@@ -13,6 +14,37 @@ defmodule Ming.Messaging.Brod.GatewayTest do
   test "producer/1 and consumer/1 resolve the brod modules" do
     assert Gateway.producer(%{}) == Ming.Messaging.Brod.Producer
     assert Gateway.consumer(%{}) == Ming.Messaging.Brod.Consumer
+  end
+
+  test "starts a buffer, a subscriber and one consumer per subscription consumer" do
+    config =
+      config(
+        subscriptions: [
+          %{name: :sub, routing_key: "topic"},
+          %{name: :multi, routing_key: "topic2", number_of_consumers: 3}
+        ]
+      )
+
+    assert {:ok, {_flags, children}} = Gateway.init(config)
+
+    ids = Enum.map(children, & &1.id)
+
+    assert Enum.count(ids, &match?({Brod.Buffer, _}, &1)) == 2
+    assert Enum.count(ids, &match?({:brod_group_subscriber, _}, &1)) == 2
+
+    consumer_names = for {:consumer, name} <- ids, do: name
+    assert length(consumer_names) == 4
+
+    subscription = %{gateway_name: :brod_gateway_test, name: :multi, routing_key: "topic2"}
+
+    for index <- 1..3 do
+      assert Brod.consumer_name(subscription, index) in consumer_names
+    end
+
+    assert Brod.consumer_name(
+             %{gateway_name: :brod_gateway_test, name: :sub, routing_key: "topic"},
+             1
+           ) in consumer_names
   end
 
   test "raises on a non-atom name" do

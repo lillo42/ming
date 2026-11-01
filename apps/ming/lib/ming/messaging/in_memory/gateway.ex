@@ -20,6 +20,10 @@ defmodule Ming.Messaging.InMemory.Gateway do
     * `:assume` — the queue is left untouched (useful when another gateway
       in the same VM already creates it)
 
+  Each subscription also starts one `Ming.Messaging.InMemory.Consumer`
+  per consumer (see `:number_of_consumers`), which drains the queue into
+  the matching `Ming.Messaging.Processor` started by the dispatcher.
+
   Delivery is at-most-once: messages are removed from the queue when
   polled, so a crash between polling and processing loses them, and nacked
   messages are discarded.
@@ -40,6 +44,7 @@ defmodule Ming.Messaging.InMemory.Gateway do
 
   @behaviour Ming.Messaging.Gateway
 
+  alias Ming.Messaging.InMemory.Consumer
   alias Ming.Messaging.InMemory.Queue
 
   def start_link(config) do
@@ -69,8 +74,35 @@ defmodule Ming.Messaging.InMemory.Gateway do
         Supervisor.child_spec({Queue, [name: Queue.resolve_name(queue)]}, id: {Queue, queue})
       end)
 
-    Supervisor.init(queues, strategy: :one_for_one)
+    consumers =
+      config
+      |> Map.get(:subscriptions, [])
+      |> Enum.flat_map(fn subscription ->
+        count = Map.get(subscription, :number_of_consumers, 1)
+        indices = if is_integer(count) and count >= 1, do: 1..count, else: []
+
+        for index <- indices do
+          consumer_name = consumer_name(config.name, subscription[:name], index)
+
+          processor_name =
+            Ming.Messaging.Processor.child_name(config.name, subscription[:name], index)
+
+          Supervisor.child_spec(
+            {Consumer,
+             name: consumer_name,
+             queue: queue_name(subscription),
+             processor: processor_name,
+             subscription: subscription},
+            id: consumer_name
+          )
+        end
+      end)
+
+    Supervisor.init(queues ++ consumers, strategy: :one_for_one)
   end
+
+  defp consumer_name(gateway, subscription, index),
+    do: :"#{Consumer}.#{gateway}.#{subscription}.#{index}"
 
   defp entries(config) do
     Map.get(config, :publications, []) ++ Map.get(config, :subscriptions, [])

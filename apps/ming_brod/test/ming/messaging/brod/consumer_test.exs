@@ -22,6 +22,18 @@ defmodule Ming.Messaging.Brod.ConsumerTest do
     buffer_name
   end
 
+  defp start_consumer(gateway_name, subscription, processor, buffer) do
+    subscription = Map.put(subscription, :gateway_name, gateway_name)
+
+    start_supervised!(
+      {Consumer,
+       name: Brod.consumer_name(subscription, 1),
+       buffer: buffer,
+       processor: processor,
+       subscription: subscription}
+    )
+  end
+
   defp message(meta \\ nil) do
     %Message{
       id: "msg-1",
@@ -62,6 +74,59 @@ defmodule Ming.Messaging.Brod.ConsumerTest do
     subscription = %{gateway_name: gateway, name: :missing, routing_key: "test"}
 
     assert {:error, _reason} = Consumer.receive_messages(subscription)
+  end
+
+  test "the GenServer drains buffered messages into the processor mailbox", %{
+    gateway_name: gateway
+  } do
+    subscription = %{name: :sub_drain, routing_key: "test", receive_timeout: 10}
+    buffer = start_buffer(gateway, subscription)
+    Process.register(self(), :brod_consumer_test_drain_processor)
+
+    start_consumer(gateway, subscription, :brod_consumer_test_drain_processor, buffer)
+
+    Buffer.push(buffer, :one)
+    Buffer.push(buffer, :two)
+
+    assert_receive {:ming_message, :one}, 500
+    assert_receive {:ming_message, :two}, 500
+  end
+
+  test "the GenServer leaves the buffer untouched while the processor is missing", %{
+    gateway_name: gateway
+  } do
+    subscription = %{
+      name: :sub_wait,
+      routing_key: "test",
+      receive_timeout: 10,
+      empty_delay: 10
+    }
+
+    buffer = start_buffer(gateway, subscription)
+    Buffer.push(buffer, :one)
+
+    start_consumer(gateway, subscription, :brod_consumer_test_no_such_processor, buffer)
+
+    Process.sleep(50)
+    assert Buffer.take(buffer, 10, 0) == [:one]
+  end
+
+  test "the GenServer starts draining once the processor registers", %{gateway_name: gateway} do
+    subscription = %{
+      name: :sub_late,
+      routing_key: "test",
+      receive_timeout: 10,
+      empty_delay: 10
+    }
+
+    buffer = start_buffer(gateway, subscription)
+    Buffer.push(buffer, :one)
+
+    start_consumer(gateway, subscription, :brod_consumer_test_late_processor, buffer)
+
+    Process.register(self(), :brod_consumer_test_late_processor)
+
+    assert_receive {:ming_message, :one}, 500
   end
 
   test "ack is a no-op without brod metadata" do

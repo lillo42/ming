@@ -83,16 +83,68 @@ defmodule Ming.Messaging.InMemory.ConsumerTest do
     start_supervised!({Queue, name: :consumer_test_defer_now})
 
     assert :ok = Consumer.defer(%{routing_key: :consumer_test_defer_now}, :again, 0)
-    assert Queue.poll(:consumer_test_defer_now, 10) == [:again]
+    assert Queue.take(:consumer_test_defer_now, 10) == [:again]
   end
 
   test "defer with a delay re-enqueues after the delay" do
     start_supervised!({Queue, name: :consumer_test_defer_later})
 
     assert :ok = Consumer.defer(%{routing_key: :consumer_test_defer_later}, :again, 20)
-    assert Queue.poll(:consumer_test_defer_later, 10) == []
+    assert Queue.take(:consumer_test_defer_later, 10) == []
 
     Process.sleep(100)
-    assert Queue.poll(:consumer_test_defer_later, 10) == [:again]
+    assert Queue.take(:consumer_test_defer_later, 10) == [:again]
+  end
+
+  test "the GenServer drains queued messages into the processor mailbox" do
+    start_supervised!({Queue, name: :consumer_test_drain})
+    Process.register(self(), :consumer_test_drain_processor)
+
+    start_supervised!(
+      {Consumer,
+       name: :consumer_test_drain_consumer,
+       queue: :consumer_test_drain,
+       processor: :consumer_test_drain_processor,
+       subscription: %{buffer_size: 5}}
+    )
+
+    Queue.push(:consumer_test_drain, :one)
+    Queue.push(:consumer_test_drain, :two)
+
+    assert_receive {:ming_message, :one}, 500
+    assert_receive {:ming_message, :two}, 500
+  end
+
+  test "the GenServer leaves the queue untouched while the processor is missing" do
+    start_supervised!({Queue, name: :consumer_test_waiting})
+    Queue.push(:consumer_test_waiting, :one)
+
+    start_supervised!(
+      {Consumer,
+       name: :consumer_test_waiting_consumer,
+       queue: :consumer_test_waiting,
+       processor: :consumer_test_no_such_processor,
+       subscription: %{}}
+    )
+
+    Process.sleep(50)
+    assert Queue.take(:consumer_test_waiting, 10) == [:one]
+  end
+
+  test "the GenServer starts draining once the processor registers" do
+    start_supervised!({Queue, name: :consumer_test_late})
+    Queue.push(:consumer_test_late, :one)
+
+    start_supervised!(
+      {Consumer,
+       name: :consumer_test_late_consumer,
+       queue: :consumer_test_late,
+       processor: :consumer_test_late_processor,
+       subscription: %{}}
+    )
+
+    Process.register(self(), :consumer_test_late_processor)
+
+    assert_receive {:ming_message, :one}, 500
   end
 end

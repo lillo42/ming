@@ -27,7 +27,7 @@ defmodule Ming.Messaging.InMemory.ProducerTest do
 
     message = message()
     assert :ok = Producer.produce(message, context(%{routing_key: :producer_test_rk}))
-    assert Queue.poll(:producer_test_rk, 10) == [message]
+    assert Queue.take(:producer_test_rk, 10) == [message]
   end
 
   test "produce resolves the queue from the :queue option" do
@@ -37,7 +37,7 @@ defmodule Ming.Messaging.InMemory.ProducerTest do
 
     message = message()
     assert :ok = Producer.produce(message, context(publication))
-    assert Queue.poll(:producer_test_explicit, 10) == [message]
+    assert Queue.take(:producer_test_explicit, 10) == [message]
   end
 
   test "produce on a missing queue returns an error" do

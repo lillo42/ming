@@ -32,6 +32,14 @@ defmodule Ming.Messaging.BrodTest do
              Brod.buffer_name(subscription)
   end
 
+  test "consumer_name keys the consumer on the subscription and the index" do
+    registry = Module.concat(:my_gateway, Registry)
+    subscription = %{gateway_name: :my_gateway, name: :reports, routing_key: "reports.generate"}
+
+    assert {:via, Registry, {^registry, {:my_gateway, :reports, 2}}} =
+             Brod.consumer_name(subscription, 2)
+  end
+
   test "topic resolves the :topic option over the routing key" do
     assert Brod.topic(%{routing_key: :reports, topic: "reports-topic"}) == "reports-topic"
     assert Brod.topic(%{routing_key: :reports}) == "reports"

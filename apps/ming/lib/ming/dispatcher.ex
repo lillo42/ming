@@ -25,14 +25,14 @@ defmodule Ming.Dispatcher do
 
   A dispatcher is also a `Supervisor`: adding it to an application
   supervision tree starts one child per declared gateway adapter plus one
-  `Ming.Messaging.Pumper` per subscription:
+  `Ming.Messaging.Processor` per subscription consumer:
 
       children = [
         MyApp.Dispatcher
       ]
 
   A subscription may set `:number_of_consumers` (default `1`) to start
-  that many competing consumers — one pumper each — polling its queue.
+  that many competing consumers — one processor each — on its queue.
 
   Gateway adapters must therefore implement `start_link/1` (or
   `child_spec/1`) accepting their configuration map — which includes the
@@ -119,7 +119,8 @@ defmodule Ming.Dispatcher do
 
       @doc """
       Starts the dispatcher's supervision tree: one child per declared
-      gateway adapter and one `Ming.Messaging.Pumper` per subscription.
+      gateway adapter and one `Ming.Messaging.Processor` per subscription
+      consumer.
       """
       def start_link(opts \\ []) do
         Supervisor.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -145,22 +146,28 @@ defmodule Ming.Dispatcher do
           |> Map.delete(:adapter)
           |> Map.put(:name, name)
 
-        pumpers =
+        processors =
           gateway
           |> Map.get(:subscriptions, [])
           |> Enum.flat_map(fn subscription ->
             consumer = adapter.consumer(subscription)
 
             for index <- 1..number_of_consumers(name, subscription) do
+              processor_name =
+                Ming.Messaging.Processor.child_name(name, subscription[:name], index)
+
               Supervisor.child_spec(
-                {Ming.Messaging.Pumper,
-                 consumer: consumer, subscription: subscription, dispatcher: __MODULE__},
-                id: {Ming.Messaging.Pumper, name, subscription[:name], index}
+                {Ming.Messaging.Processor,
+                 name: processor_name,
+                 consumer: consumer,
+                 subscription: subscription,
+                 dispatcher: __MODULE__},
+                id: processor_name
               )
             end
           end)
 
-        [Supervisor.child_spec({adapter, gateway_config}, id: {adapter, name}) | pumpers]
+        [Supervisor.child_spec({adapter, gateway_config}, id: {adapter, name}) | processors]
       end
 
       defp number_of_consumers(gateway_name, subscription) do

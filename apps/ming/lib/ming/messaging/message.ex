@@ -44,6 +44,7 @@ defmodule Ming.Messaging.Message do
           data_schema: URI.t() | String.t() | nil,
           data_ref: URI.t() | String.t() | nil,
           headers: map(),
+          metadata: map(),
           partition_key: String.t() | atom() | nil,
           payload: binary() | iodata(),
           reply_to: URI.t() | String.t() | nil,
@@ -74,9 +75,10 @@ defmodule Ming.Messaging.Message do
     :trace_parent,
     :timestamp,
     content_type: "text/plain",
+    metadata: %{},
     source: URI.new!("ming"),
+    spec_version: "1.0",
     type: "ming",
-    headers: %{},
-    spec_version: "1.0"
+    headers: %{}
   ]
 end

@@ -31,22 +31,22 @@ defmodule Ming.Messaging.InMemory.Queue do
   end
 
   @impl true
-  def handle_call({:pop, buffer_size}, _from, queue) do
-    {messages, queue} = pop(buffer_size, queue, [])
+  def handle_call({:take, buffer_size}, _from, queue) do
+    {messages, queue} = take(buffer_size, queue, [])
     {:reply, Enum.reverse(messages), queue}
   end
 
   defp enqueue(item, queue), do: :queue.in(item, queue)
 
-  defp pop(0, queue, acc), do: {acc, queue}
+  defp take(0, queue, acc), do: {acc, queue}
 
-  defp pop(buffer_size, queue, acc) do
+  defp take(buffer_size, queue, acc) do
     case :queue.out(queue) do
       {{:value, item}, new_queue} ->
-        pop(buffer_size - 1, new_queue, [item | acc])
+        take(buffer_size - 1, new_queue, [item | acc])
 
       {:empty, new_queue} ->
-        pop(0, new_queue, acc)
+        take(0, new_queue, acc)
     end
   end
 
@@ -60,10 +60,9 @@ defmodule Ming.Messaging.InMemory.Queue do
   def resolve_name(name) when is_binary(name), do: String.to_atom(name)
 
   def push(queue, item), do: request(queue, {:push, item})
-
   def push(queue, item, delay), do: request(queue, {:push, item, delay})
 
-  def poll(queue, buffer_size), do: request(queue, {:pop, buffer_size})
+  def take(queue, buffer_size), do: request(queue, {:take, buffer_size})
 
   defp request(queue, message) do
     GenServer.call(resolve_name(queue), message)
